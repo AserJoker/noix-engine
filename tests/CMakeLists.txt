@@ -1,0 +1,51 @@
+include(FetchContent)
+FetchContent_Declare(googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+# ---- Unit Tests ----
+add_executable(test_unit
+    unit/test_args_parser.cpp
+    unit/test_namespaced_id.cpp
+    unit/test_resource_pack.cpp
+    unit/test_sink.cpp
+    unit/test_js_engine.cpp
+    unit/test_command.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ArgsParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/NamespacedId.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Sink.cpp
+    ${CMAKE_SOURCE_DIR}/src/resource/ResourcePack.cpp
+    ${CMAKE_SOURCE_DIR}/src/script/JSEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/debug/EvalCommand.cpp
+    ${CMAKE_SOURCE_DIR}/src/debug/ShutdownCommand.cpp
+)
+target_link_libraries(test_unit PRIVATE GTest::gtest_main SDL3::SDL3 qjs cjson)
+target_include_directories(test_unit PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/third_party/cJSON
+)
+
+# ---- Integration Tests ----
+add_executable(test_integration
+    integration/helpers/HttpClient.cpp
+    integration/test_debug_server.cpp
+    integration/test_js_eval.cpp
+    integration/test_shutdown.cpp
+)
+target_link_libraries(test_integration PRIVATE GTest::gtest_main SDL3::SDL3 SDL3_net::SDL3_net)
+target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/integration/helpers)
+
+# ---- Output to dist/ ----
+set_target_properties(test_unit test_integration PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
+)
+
+include(GoogleTest)
+gtest_discover_tests(test_unit)
+gtest_discover_tests(test_integration)

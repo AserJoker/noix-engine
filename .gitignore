@@ -1,0 +1,7 @@
+build/
+dist/
+.cache/
+.vs/
+*.user
+CMakeSettings.json
+compile_commands.json
