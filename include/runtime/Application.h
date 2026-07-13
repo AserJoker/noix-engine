@@ -7,6 +7,7 @@
 #include <string>
 #include "core/ArgsParser.h"
 
+namespace noix::core { class ConfigManager; }
 namespace noix::debug { class DebugServer; }
 namespace noix::resource { class ResourcePack; }
 namespace noix::script { class JSEngine; }
@@ -16,6 +17,30 @@ struct SDL_Window;
 namespace noix::runtime {
 
 enum class RunMode { ServerOnly, Full };
+
+enum class WindowMode {
+    Windowed,          // 有边框窗口
+    Borderless,        // 无边框窗口（全屏窗口）
+    Fullscreen         // 独占全屏
+};
+
+enum class Resolution {
+    HD,       // 1280x720
+    FHD,      // 1920x1080
+    QHD,      // 2560x1440
+    UHD       // 3840x2160
+};
+
+struct ResolutionSize {
+    int width;
+    int height;
+};
+
+ResolutionSize getResolutionSize(Resolution res);
+const char* toString(WindowMode mode);
+WindowMode parseWindowMode(const std::string& str);
+Resolution parseResolution(const std::string& str);
+const char* toString(Resolution res);
 
 class Application {
 public:
@@ -29,6 +54,7 @@ public:
 
     const std::string& basePath() const { return _basePath; }
     const core::ArgsParser& args() const { return _args; }
+    core::ConfigManager& configManager() const { return *_configManager; }
     RunMode runMode() const { return _runMode; }
     bool isHeadless() const { return _runMode == RunMode::ServerOnly; }
     resource::ResourcePack& resourcePack() const { return *_resourcePack; }
@@ -44,6 +70,7 @@ private:
 
     core::ArgsParser _args;
     std::string _basePath;
+    std::unique_ptr<core::ConfigManager> _configManager;
     std::unique_ptr<debug::DebugServer> _debugServer;
     std::unique_ptr<resource::ResourcePack> _resourcePack;
     std::unique_ptr<script::JSEngine> _jsEngine;

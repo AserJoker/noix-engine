@@ -22,8 +22,8 @@ TEST_F(DebugServerTest, InitializeCreatesSession) {
         R"({"arguments":{"clientName":"gtest","clientVersion":"1.0"}})");
     EXPECT_EQ(resp.statusCode, 200);
     EXPECT_NE(resp.body.find("sessionId"), std::string::npos);
-    EXPECT_NE(resp.body.find("debug:eval"), std::string::npos);
-    EXPECT_NE(resp.body.find("debug:shutdown"), std::string::npos);
+    EXPECT_NE(resp.body.find("noix:exec-script"), std::string::npos);
+    EXPECT_NE(resp.body.find("noix:shutdown"), std::string::npos);
 }
 
 TEST_F(DebugServerTest, StatusWithoutSession) {
@@ -33,7 +33,7 @@ TEST_F(DebugServerTest, StatusWithoutSession) {
 
 TEST_F(DebugServerTest, CommandWithoutSessionReturnsError) {
     auto resp = _client->post("/debug/command",
-        R"({"namespace":"debug","command":"eval","arguments":{"expr":"1+1"}})");
+        R"({"namespace":"noix","command":"exec-script","arguments":{"expr":"1+1"}})");
     EXPECT_EQ(resp.statusCode, 200);
     EXPECT_NE(resp.body.find("session expired"), std::string::npos);
 }

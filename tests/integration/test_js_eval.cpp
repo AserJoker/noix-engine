@@ -23,7 +23,7 @@ TEST_F(JsEvalTest, EvalArithmetic) {
 
     // Eval expression
     auto evalResp = _client->post("/debug/command",
-        "{\"namespace\":\"debug\",\"command\":\"eval\","
+        "{\"namespace\":\"noix\",\"command\":\"exec-script\","
         "\"arguments\":{\"expr\":\"40+2\",\"sessionId\":\"" + sid + "\"}}");
     EXPECT_EQ(evalResp.statusCode, 200);
     EXPECT_NE(evalResp.body.find("42"), std::string::npos);
@@ -44,7 +44,7 @@ TEST_F(JsEvalTest, EvalSyntaxError) {
     sid = initResp.body.substr(pos, end - pos);
 
     auto evalResp = _client->post("/debug/command",
-        "{\"namespace\":\"debug\",\"command\":\"eval\","
+        "{\"namespace\":\"noix\",\"command\":\"exec-script\","
         "\"arguments\":{\"expr\":\"!!!invalid!!!\",\"sessionId\":\"" + sid + "\"}}");
     EXPECT_EQ(evalResp.statusCode, 200);
     // Should return some error, not crash

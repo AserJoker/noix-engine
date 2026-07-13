@@ -1,15 +1,12 @@
 #pragma once
 
 #include "HttpClient.h"
+#include <SDL3/SDL_process.h>
 #include <SDL3_net/SDL_net.h>
 #include <chrono>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <thread>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 namespace noix::test {
 
@@ -18,11 +15,7 @@ protected:
     uint16_t _port = 0;
     std::unique_ptr<HttpClient> _client;
     std::filesystem::path _tempDir;
-
-#ifdef _WIN32
-    PROCESS_INFORMATION _procInfo = {};
-    bool _processCreated = false;
-#endif
+    SDL_Process *_process = nullptr;
 
     void SetUp() override {
         // Create temp directory for this test's logs
@@ -44,7 +37,7 @@ protected:
                 std::string sid = extractSessionId(initResp.body);
                 if (!sid.empty()) {
                     _client->post("/debug/command",
-                        "{\"namespace\":\"debug\",\"command\":\"shutdown\","
+                        "{\"namespace\":\"noix\",\"command\":\"shutdown\","
                         "\"arguments\":{\"sessionId\":\"" + sid + "\"}}");
                 }
             }
@@ -52,6 +45,11 @@ protected:
 
         if (!waitForProcessExit(5000)) {
             killProcess();
+        }
+
+        if (_process) {
+            SDL_DestroyProcess(_process);
+            _process = nullptr;
         }
 
         // Clean up temp directory
@@ -76,24 +74,19 @@ protected:
 
 private:
     void launchEngine(uint16_t port) {
-#ifdef _WIN32
-        std::string cmdLine = "noix-engine.exe --headless --debug-port " + std::to_string(port)
-            + " --base-path " + _tempDir.string();
+        std::string portStr = std::to_string(port);
+        std::string basePathStr = _tempDir.string();
 
-        STARTUPINFOW si = {sizeof(STARTUPINFOW)};
-        std::wstring wCmdLine(cmdLine.begin(), cmdLine.end());
+        const char *args[] = {
+            "noix-engine",
+            "--headless",
+            "--debug-port", portStr.c_str(),
+            "--base-path", basePathStr.c_str(),
+            nullptr
+        };
 
-        BOOL result = CreateProcessW(
-            nullptr,
-            wCmdLine.data(),
-            nullptr, nullptr, FALSE,
-            CREATE_NEW_PROCESS_GROUP,
-            nullptr, nullptr,
-            &si, &_procInfo);
-
-        ASSERT_TRUE(result) << "Failed to launch engine subprocess";
-        _processCreated = true;
-#endif
+        _process = SDL_CreateProcess(args, false);
+        ASSERT_TRUE(_process) << "Failed to launch engine subprocess: " << SDL_GetError();
     }
 
     void waitForServerReady() {
@@ -110,20 +103,22 @@ private:
     }
 
     bool waitForProcessExit(int timeoutMs) {
-#ifdef _WIN32
-        if (!_processCreated) return true;
-        return WaitForSingleObject(_procInfo.hProcess, timeoutMs) == WAIT_OBJECT_0;
-#else
-        return true;
-#endif
+        if (!_process) return true;
+        auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(timeoutMs);
+        while (std::chrono::steady_clock::now() < deadline) {
+            int exitcode;
+            if (SDL_WaitProcess(_process, false, &exitcode)) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return false;
     }
 
     void killProcess() {
-#ifdef _WIN32
-        if (!_processCreated) return;
-        TerminateProcess(_procInfo.hProcess, 1);
-        WaitForSingleObject(_procInfo.hProcess, 3000);
-#endif
+        if (!_process) return;
+        SDL_KillProcess(_process, true);
     }
 
     static std::string extractSessionId(const std::string& json) {

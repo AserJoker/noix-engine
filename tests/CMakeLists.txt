@@ -11,17 +11,22 @@ enable_testing()
 # ---- Unit Tests ----
 add_executable(test_unit
     unit/test_args_parser.cpp
+    unit/test_config.cpp
+    unit/test_config_manager.cpp
     unit/test_namespaced_id.cpp
     unit/test_resource_pack.cpp
     unit/test_sink.cpp
     unit/test_js_engine.cpp
     unit/test_command.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ArgsParser.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Config.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/core/NamespacedId.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sink.cpp
     ${CMAKE_SOURCE_DIR}/src/resource/ResourcePack.cpp
     ${CMAKE_SOURCE_DIR}/src/script/JSEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/debug/ConfigGetCommand.cpp
     ${CMAKE_SOURCE_DIR}/src/debug/EvalCommand.cpp
     ${CMAKE_SOURCE_DIR}/src/debug/ShutdownCommand.cpp
 )

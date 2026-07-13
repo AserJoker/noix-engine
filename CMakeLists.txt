@@ -28,10 +28,13 @@ add_subdirectory(third_party/SDL_net)
 add_executable(noix-engine
     src/main.cpp
     src/core/ArgsParser.cpp
+    src/core/Config.cpp
+    src/core/ConfigManager.cpp
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
     src/debug/DebugServer.cpp
+    src/debug/ConfigGetCommand.cpp
     src/debug/EvalCommand.cpp
     src/debug/HttpServer.cpp
     src/debug/ShutdownCommand.cpp

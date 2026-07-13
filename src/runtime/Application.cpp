@@ -1,5 +1,7 @@
 #include "runtime/Application.h"
+#include "core/ConfigManager.h"
 #include "core/Logger.h"
+#include "debug/ConfigGetCommand.h"
 #include "debug/DebugServer.h"
 #include "debug/EvalCommand.h"
 #include "debug/ShutdownCommand.h"
@@ -9,6 +11,48 @@
 #include <filesystem>
 
 namespace noix::runtime {
+
+ResolutionSize getResolutionSize(Resolution res) {
+    switch (res) {
+    case Resolution::HD:  return {1280, 720};
+    case Resolution::FHD: return {1920, 1080};
+    case Resolution::QHD: return {2560, 1440};
+    case Resolution::UHD: return {3840, 2160};
+    }
+    return {1920, 1080};
+}
+
+const char* toString(WindowMode mode) {
+    switch (mode) {
+    case WindowMode::Windowed:   return "windowed";
+    case WindowMode::Borderless: return "borderless";
+    case WindowMode::Fullscreen: return "fullscreen";
+    }
+    return "windowed";
+}
+
+WindowMode parseWindowMode(const std::string& str) {
+    if (str == "borderless") return WindowMode::Borderless;
+    if (str == "fullscreen") return WindowMode::Fullscreen;
+    return WindowMode::Windowed;
+}
+
+Resolution parseResolution(const std::string& str) {
+    if (str == "hd")  return Resolution::HD;
+    if (str == "qhd") return Resolution::QHD;
+    if (str == "uhd") return Resolution::UHD;
+    return Resolution::FHD;
+}
+
+const char* toString(Resolution res) {
+    switch (res) {
+    case Resolution::HD:  return "hd";
+    case Resolution::FHD: return "fhd";
+    case Resolution::QHD: return "qhd";
+    case Resolution::UHD: return "uhd";
+    }
+    return "fhd";
+}
 
 Application::Application(int argc, char* argv[]) {
     _args.parse(argc, argv);
@@ -36,11 +80,26 @@ bool Application::initCore() {
 }
 
 bool Application::initWindow() {
-    _window = SDL_CreateWindow("noix-engine", 800, 600, 0);
+    auto cfg = _configManager->get(core::NamespacedId("noix", "application"));
+    auto windowCfg = cfg.getObject("window");
+    WindowMode mode = parseWindowMode(windowCfg.getString("mode", "borderless"));
+    Resolution res = parseResolution(windowCfg.getString("resolution", "fhd"));
+    auto [width, height] = getResolutionSize(res);
+
+    SDL_WindowFlags flags = 0;
+    if (mode == WindowMode::Fullscreen) flags = SDL_WINDOW_FULLSCREEN;
+    else if (mode == WindowMode::Borderless) flags = SDL_WINDOW_BORDERLESS;
+
+    _window = SDL_CreateWindow("noix-engine", width, height, flags);
     if (!_window) {
         core::Logger::instance().error("SDL_CreateWindow failed: {}", SDL_GetError());
         return false;
     }
+
+    // 禁止用户调整窗口大小，尺寸仅由配置中的 resolution 决定
+    SDL_SetWindowResizable(_window, false);
+
+    core::Logger::instance().info("Window created ({}x{}, {})", width, height, toString(mode));
     return true;
 }
 
@@ -88,10 +147,20 @@ void Application::initDebugServer() {
     uint16_t port = 9900;
     if (_args.has("debug-port")) port = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
     _debugServer = std::make_unique<debug::DebugServer>(port, 30);
-    _debugServer->registerCommand(core::NamespacedId("debug", "eval"),
+    _debugServer->registerCommand(core::NamespacedId("noix", "exec-script"),
         std::make_unique<debug::EvalCommand>(*_jsEngine));
-    _debugServer->registerCommand(core::NamespacedId("debug", "shutdown"),
+    _debugServer->registerCommand(core::NamespacedId("noix", "shutdown"),
         std::make_unique<debug::ShutdownCommand>(_shutdownEventType));
+    _debugServer->registerCommand(core::NamespacedId("noix", "config-get"),
+        std::make_unique<debug::ConfigGetCommand>(*_configManager));
+    _debugServer->registerCommand(core::NamespacedId("noix", "config-set"),
+        std::make_unique<debug::ConfigSetCommand>(*_configManager));
+    _debugServer->registerCommand(core::NamespacedId("noix", "config-remove"),
+        std::make_unique<debug::ConfigRemoveCommand>(*_configManager));
+    _debugServer->registerCommand(core::NamespacedId("noix", "config-save"),
+        std::make_unique<debug::ConfigSaveCommand>(*_configManager));
+    _debugServer->registerCommand(core::NamespacedId("noix", "config-list"),
+        std::make_unique<debug::ConfigListCommand>(*_configManager));
     _debugServer->start();
     core::Logger::instance().info("DebugServer started on port {}", port);
 }
@@ -100,6 +169,20 @@ int Application::run() {
     try {
     initLogger();
     if (!initCore()) { cleanup(); return 1; }
+    _configManager = std::make_unique<core::ConfigManager>(
+        std::filesystem::path(_basePath) / "config");
+    _configManager->loadAll();
+
+    // 初始化 noix:application 默认配置
+    {
+        core::Config defaults;
+        core::Config windowDefaults;
+        windowDefaults.setString("mode", "borderless");
+        windowDefaults.setString("resolution", "fhd");
+        defaults.setObject("window", std::move(windowDefaults));
+        _configManager->getOrDefault(core::NamespacedId("noix", "application"), defaults);
+    }
+
     initResourcePack();
     if (!isHeadless()) {
         if (!initWindow()) { cleanup(); return 1; }
@@ -132,6 +215,10 @@ void Application::cleanup() {
     _debugServer.reset();
     _resourcePack.reset();
     _jsEngine.reset();
+    if (_configManager) {
+        _configManager->saveAll();
+        _configManager.reset();
+    }
     if (_window) { SDL_DestroyWindow(_window); _window = nullptr; }
     if (_sdlInitialized) {
         SDL_Quit();

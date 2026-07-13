@@ -25,7 +25,7 @@ TEST_F(ShutdownTest, ShutdownViaDebugServer) {
 
     // Send shutdown command
     auto shutdownResp = _client->post("/debug/command",
-        "{\"namespace\":\"debug\",\"command\":\"shutdown\","
+        "{\"namespace\":\"noix\",\"command\":\"shutdown\","
         "\"arguments\":{\"sessionId\":\"" + sid + "\"}}");
     EXPECT_EQ(shutdownResp.statusCode, 200);
     EXPECT_NE(shutdownResp.body.find("shutting down"), std::string::npos);
