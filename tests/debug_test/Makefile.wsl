@@ -18,7 +18,10 @@ libregexp.o: $(QJS)/libregexp.c
 libunicode.o: $(QJS)/libunicode.c
 	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
 
-test_debug: test_debug.c quickjs.o quickjs-libc.o libregexp.o libunicode.o
+dtoa.o: $(QJS)/dtoa.c
+	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
+
+test_debug: test_debug.c quickjs.o quickjs-libc.o libregexp.o libunicode.o dtoa.o
 	$(CC) $(CFLAGS) -I$(QJS) -o $@ $^ $(LDFLAGS)
 
 valgrind: test_debug
