@@ -18,6 +18,33 @@ std::filesystem::path ConfigManager::entryPath(const NamespacedId& id) const {
     return _configDir / id.ns() / (id.name() + ".json");
 }
 
+void ConfigManager::saveToDisk(const NamespacedId& id,
+                               const std::filesystem::path& path) {
+    std::string json;
+    {
+        std::lock_guard lock(_mutex);
+        auto it = _entries.find(id);
+        if (it == _entries.end()) return;
+        json = it->second.config.toJson();
+    }
+
+    std::filesystem::create_directories(path.parent_path());
+
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        Logger::instance().error("Failed to write config file: {}", path.string());
+        return;
+    }
+    file << json;
+    file.close();
+
+    {
+        std::lock_guard lock(_mutex);
+        auto it = _entries.find(id);
+        if (it != _entries.end()) it->second.dirty = false;
+    }
+}
+
 // --- 查询 ---
 
 bool ConfigManager::has(const NamespacedId& id) const {
@@ -43,26 +70,36 @@ std::vector<NamespacedId> ConfigManager::list() const {
 }
 
 Config ConfigManager::getOrDefault(const NamespacedId& id, const Config& defaultCfg) {
-    std::lock_guard lock(_mutex);
-    auto it = _entries.find(id);
-    if (it != _entries.end()) return it->second.config;
+    std::filesystem::path path;
+    {
+        std::lock_guard lock(_mutex);
+        auto it = _entries.find(id);
+        if (it != _entries.end()) return it->second.config;
 
-    _entries.emplace(id, Entry{Config(defaultCfg), true});
-    Logger::instance().info("Created default config: {}:{}", id.ns(), id.name());
-    return _entries.at(id).config;
+        _entries.emplace(id, Entry{Config(defaultCfg), true});
+        path = entryPath(id);
+        Logger::instance().info("Created default config: {}:{}", id.ns(), id.name());
+    }
+    saveToDisk(id, path);
+    return get(id);
 }
 
 // --- 创建/写入 ---
 
 void ConfigManager::set(const NamespacedId& id, Config cfg) {
-    std::lock_guard lock(_mutex);
-    auto it = _entries.find(id);
-    if (it != _entries.end()) {
-        it->second.config = std::move(cfg);
-        it->second.dirty = true;
-    } else {
-        _entries.emplace(id, Entry{std::move(cfg), true});
+    std::filesystem::path path;
+    {
+        std::lock_guard lock(_mutex);
+        auto it = _entries.find(id);
+        if (it != _entries.end()) {
+            it->second.config = std::move(cfg);
+            it->second.dirty = true;
+        } else {
+            _entries.emplace(id, Entry{std::move(cfg), true});
+        }
+        path = entryPath(id);
     }
+    saveToDisk(id, path);
 }
 
 Config ConfigManager::fromJson(const std::string& json) {
@@ -74,10 +111,17 @@ Config ConfigManager::fromJson(const std::string& json) {
 // --- 删除 ---
 
 bool ConfigManager::remove(const NamespacedId& id) {
-    std::lock_guard lock(_mutex);
-    auto it = _entries.find(id);
-    if (it == _entries.end()) return false;
-    _entries.erase(it);
+    std::filesystem::path path;
+    {
+        std::lock_guard lock(_mutex);
+        auto it = _entries.find(id);
+        if (it == _entries.end()) return false;
+        path = entryPath(id);
+        _entries.erase(it);
+    }
+    if (!path.empty() && std::filesystem::exists(path)) {
+        std::filesystem::remove(path);
+    }
     return true;
 }
 
@@ -153,45 +197,27 @@ bool ConfigManager::save(const NamespacedId& id) {
     auto it = _entries.find(id);
     if (it == _entries.end()) return false;
     if (!it->second.dirty) return true;
-
     auto path = entryPath(id);
+    lock.~lock_guard();
 
-    // 确保目录存在
-    std::filesystem::create_directories(path.parent_path());
-
-    std::string json = it->second.config.toJson();
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        Logger::instance().error("Failed to write config file: {}", path.string());
-        return false;
-    }
-    file << json;
-    file.close();
-
-    it->second.dirty = false;
-    Logger::instance().info("Saved config: {}:{}", id.ns(), id.name());
+    saveToDisk(id, path);
     return true;
 }
 
 int ConfigManager::saveAll() {
-    std::lock_guard lock(_mutex);
-    int count = 0;
-    for (auto& [id, entry] : _entries) {
-        if (!entry.dirty) continue;
-
-        auto path = entryPath(id);
-        std::filesystem::create_directories(path.parent_path());
-
-        std::string json = entry.config.toJson();
-        std::ofstream file(path);
-        if (!file.is_open()) {
-            Logger::instance().error("Failed to write config file: {}", path.string());
-            continue;
+    std::vector<std::pair<NamespacedId, std::filesystem::path>> toSave;
+    {
+        std::lock_guard lock(_mutex);
+        for (auto& [id, entry] : _entries) {
+            if (entry.dirty) {
+                toSave.emplace_back(id, entryPath(id));
+            }
         }
-        file << json;
-        file.close();
+    }
 
-        entry.dirty = false;
+    int count = 0;
+    for (auto& [id, path] : toSave) {
+        saveToDisk(id, path);
         ++count;
     }
 

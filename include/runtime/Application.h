@@ -7,10 +7,12 @@
 #include <string>
 #include "core/ArgsParser.h"
 
+#include <csignal>
+
 namespace noix::core { class ConfigManager; }
 namespace noix::debug { class DebugServer; }
 namespace noix::resource { class ResourcePack; }
-namespace noix::script { class JSEngine; }
+namespace noix::script { class ScriptEngine; }
 
 struct SDL_Window;
 
@@ -50,6 +52,16 @@ public:
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
+    static Application& instance();
+
+private:
+    static Application* _instance;
+    static void signalHandler(int sig);
+
+public:
+    static void requestShutdown();
+
+public:
     int run();
 
     const std::string& basePath() const { return _basePath; }
@@ -58,6 +70,7 @@ public:
     RunMode runMode() const { return _runMode; }
     bool isHeadless() const { return _runMode == RunMode::ServerOnly; }
     resource::ResourcePack& resourcePack() const { return *_resourcePack; }
+    script::ScriptEngine& scriptEngine() const { return *_scriptEngine; }
 
 private:
     bool initCore();
@@ -73,10 +86,13 @@ private:
     std::unique_ptr<core::ConfigManager> _configManager;
     std::unique_ptr<debug::DebugServer> _debugServer;
     std::unique_ptr<resource::ResourcePack> _resourcePack;
-    std::unique_ptr<script::JSEngine> _jsEngine;
+    std::unique_ptr<script::ScriptEngine> _scriptEngine;
     SDL_Window* _window = nullptr;
     std::atomic<bool> _running{false};
+    std::atomic<bool> _frozen{false};
     uint32_t _shutdownEventType = 0;
+    uint32_t _freezeEventType = 0;
+    uint32_t _resumeEventType = 0;
     RunMode _runMode = RunMode::Full;
     bool _sdlInitialized = false;
     bool _cleanedUp = false;

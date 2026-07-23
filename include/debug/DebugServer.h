@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -48,6 +49,7 @@ private:
     uint32_t _timeoutSeconds;
     std::map<std::string, Session> _sessions;
     std::mutex _sessionMutex;
+    std::condition_variable _sessionCv;
     std::thread _sessionThread;
     std::atomic<bool> _running{false};
 

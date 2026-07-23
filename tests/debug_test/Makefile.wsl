@@ -1,0 +1,31 @@
+CC = gcc
+CFLAGS = -g -O0 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE
+LDFLAGS = -lm -ldl -lpthread
+
+all: test_debug
+
+quickjs.o: quickjs.c quickjs.h quickjs-opcode.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+quickjs-libc.o: quickjs-libc.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+libregexp.o: libregexp.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+libunicode.o: libunicode.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_debug: test_debug.c quickjs.o quickjs-libc.o libregexp.o libunicode.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+valgrind: test_debug
+	valgrind --leak-check=full --error-exitcode=1 ./test_debug
+
+gdb: test_debug
+	gdb ./test_debug
+
+clean:
+	rm -f test_debug *.o
+
+.PHONY: all valgrind gdb clean

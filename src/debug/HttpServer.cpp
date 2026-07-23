@@ -189,7 +189,7 @@ void HttpServer::sendResponse(NET_StreamSocket* sock, int statusCode,
         body;
 
     NET_WriteToStreamSocket(sock, response.data(), static_cast<int>(response.size()));
-    NET_WaitUntilStreamSocketDrained(sock, 5000);
+    NET_WaitUntilStreamSocketDrained(sock, 500);
 }
 
 } // namespace noix::debug

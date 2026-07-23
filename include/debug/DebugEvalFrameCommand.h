@@ -6,9 +6,9 @@ namespace noix::script { class ScriptEngine; }
 
 namespace noix::debug {
 
-class EvalCommand : public Command {
+class DebugEvalFrameCommand : public Command {
 public:
-    explicit EvalCommand(script::ScriptEngine& engine);
+    explicit DebugEvalFrameCommand(script::ScriptEngine& engine);
     std::string execute(const std::string& arguments) override;
 
 private:

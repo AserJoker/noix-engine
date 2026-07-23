@@ -30,21 +30,32 @@ protected:
     }
 
     void TearDown() override {
+        // 1. 尝试优雅关闭：先 continue（解除暂停），再 shutdown
         if (_client) {
+            // 创建临时会话用于发送关闭命令
             auto initResp = _client->post("/debug/initialize",
                 R"({"arguments":{"clientName":"test","clientVersion":"1.0"}})");
             if (initResp.statusCode == 200) {
                 std::string sid = extractSessionId(initResp.body);
                 if (!sid.empty()) {
+                    // 先 continue，解除可能存在的调试暂停
+                    _client->post("/debug/command",
+                        "{\"namespace\":\"noix\",\"command\":\"debug-continue\","
+                        "\"arguments\":{\"sessionId\":\"" + sid + "\"}}");
+                    // 再 shutdown
                     _client->post("/debug/command",
                         "{\"namespace\":\"noix\",\"command\":\"shutdown\","
                         "\"arguments\":{\"sessionId\":\"" + sid + "\"}}");
                 }
             }
+            _client.reset();
         }
 
+        // 2. 等待进程退出
         if (!waitForProcessExit(5000)) {
             killProcess();
+            // 强杀后额外等待，确保文件句柄释放
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
         if (_process) {
@@ -52,8 +63,12 @@ protected:
             _process = nullptr;
         }
 
-        // Clean up temp directory
-        std::filesystem::remove_all(_tempDir);
+        // 3. 清理临时目录（包括日志文件）
+        if (!_tempDir.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(_tempDir, ec);
+            // 忽略清理失败（文件可能仍被占用）
+        }
     }
 
     static uint16_t allocateFreePort() {

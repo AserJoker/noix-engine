@@ -20,8 +20,17 @@ void Logger::removeSink(const std::shared_ptr<Sink>& sink) {
     std::lock_guard lock(_mutex);
     auto it = std::find(_sinks.begin(), _sinks.end(), sink);
     if (it != _sinks.end()) {
+        (*it)->flush();
         _sinks.erase(it);
     }
+}
+
+void Logger::clearSinks() {
+    std::lock_guard lock(_mutex);
+    for (auto& sink : _sinks) {
+        sink->flush();
+    }
+    _sinks.clear();
 }
 
 void Logger::setLevel(LogLevel level) {

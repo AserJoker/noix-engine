@@ -1,14 +1,15 @@
 #pragma once
 
 #include "debug/Command.h"
+#include <string>
 
 namespace noix::script { class ScriptEngine; }
 
 namespace noix::debug {
 
-class EvalCommand : public Command {
+class SourceMapCommand : public Command {
 public:
-    explicit EvalCommand(script::ScriptEngine& engine);
+    explicit SourceMapCommand(script::ScriptEngine& engine);
     std::string execute(const std::string& arguments) override;
 
 private:

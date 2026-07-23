@@ -2,15 +2,26 @@
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
 #include "debug/ConfigGetCommand.h"
+#include "debug/DebugControlCommand.h"
+#include "debug/DebugEvalCommand.h"
+#include "debug/DebugEvalFrameCommand.h"
 #include "debug/DebugServer.h"
+#include "debug/DebugVariablesCommand.h"
+#include "debug/DebugStatusCommand.h"
+#include "debug/BreakpointCommand.h"
 #include "debug/EvalCommand.h"
 #include "debug/ShutdownCommand.h"
+#include "debug/StackTraceCommand.h"
+#include "debug/SourceMapCommand.h"
+#include "debug/DebugRunCommand.h"
 #include "resource/ResourcePack.h"
-#include "script/JSEngine.h"
+#include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
 
 namespace noix::runtime {
+
+Application* Application::_instance = nullptr;
 
 ResolutionSize getResolutionSize(Resolution res) {
     switch (res) {
@@ -69,6 +80,10 @@ Application::Application(int argc, char* argv[]) {
 
 Application::~Application() { cleanup(); }
 
+Application& Application::instance() {
+    return *_instance;
+}
+
 bool Application::initCore() {
     SDL_InitFlags flags = isHeadless() ? SDL_INIT_EVENTS : SDL_INIT_VIDEO;
     if (!SDL_Init(flags)) {
@@ -82,7 +97,7 @@ bool Application::initCore() {
 bool Application::initWindow() {
     auto cfg = _configManager->get(core::NamespacedId("noix", "application"));
     auto windowCfg = cfg.getObject("window");
-    WindowMode mode = parseWindowMode(windowCfg.getString("mode", "borderless"));
+    WindowMode mode = parseWindowMode(windowCfg.getString("mode", "windowed"));
     Resolution res = parseResolution(windowCfg.getString("resolution", "fhd"));
     auto [width, height] = getResolutionSize(res);
 
@@ -96,8 +111,8 @@ bool Application::initWindow() {
         return false;
     }
 
-    // 禁止用户调整窗口大小，尺寸仅由配置中的 resolution 决定
-    SDL_SetWindowResizable(_window, false);
+    // 窗口模式下允许调整大小，全屏/无边框模式下禁止
+    SDL_SetWindowResizable(_window, mode == WindowMode::Windowed);
 
     core::Logger::instance().info("Window created ({}x{}, {})", width, height, toString(mode));
     return true;
@@ -143,12 +158,19 @@ void Application::initResourcePack() {
 
 void Application::initDebugServer() {
     _shutdownEventType = SDL_RegisterEvents(1);
-    _jsEngine = std::make_unique<script::JSEngine>();
+    _freezeEventType = SDL_RegisterEvents(1);
+    _resumeEventType = SDL_RegisterEvents(1);
+    _scriptEngine = std::make_unique<script::ScriptEngine>(_basePath);
+    _scriptEngine->setDebugEventTypes(_freezeEventType, _resumeEventType);
+    if (_args.has("debug-wait")) {
+        _scriptEngine->setDebugWait(true);
+    }
+    // TODO: 注册原生模块（需 JS 引擎确定后重新设计）
     uint16_t port = 9900;
     if (_args.has("debug-port")) port = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
     _debugServer = std::make_unique<debug::DebugServer>(port, 30);
     _debugServer->registerCommand(core::NamespacedId("noix", "exec-script"),
-        std::make_unique<debug::EvalCommand>(*_jsEngine));
+        std::make_unique<debug::EvalCommand>(*_scriptEngine));
     _debugServer->registerCommand(core::NamespacedId("noix", "shutdown"),
         std::make_unique<debug::ShutdownCommand>(_shutdownEventType));
     _debugServer->registerCommand(core::NamespacedId("noix", "config-get"),
@@ -161,11 +183,72 @@ void Application::initDebugServer() {
         std::make_unique<debug::ConfigSaveCommand>(*_configManager));
     _debugServer->registerCommand(core::NamespacedId("noix", "config-list"),
         std::make_unique<debug::ConfigListCommand>(*_configManager));
+    // 调试控制命令
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-pause"),
+        std::make_unique<debug::PauseCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-continue"),
+        std::make_unique<debug::ContinueCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-step"),
+        std::make_unique<debug::StepCommand>(*_scriptEngine));
+    // 断点命令
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-breakpoint-set"),
+        std::make_unique<debug::BreakpointSetCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-breakpoint-remove"),
+        std::make_unique<debug::BreakpointRemoveCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-breakpoint-clear"),
+        std::make_unique<debug::BreakpointClearCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-breakpoint-list"),
+        std::make_unique<debug::BreakpointListCommand>(*_scriptEngine));
+    // 检查命令
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-stack-trace"),
+        std::make_unique<debug::StackTraceCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-eval"),
+        std::make_unique<debug::DebugEvalCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-status"),
+        std::make_unique<debug::DebugStatusCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-variables"),
+        std::make_unique<debug::DebugVariablesCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-eval-frame"),
+        std::make_unique<debug::DebugEvalFrameCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-source-map"),
+        std::make_unique<debug::SourceMapCommand>(*_scriptEngine));
+    _debugServer->registerCommand(core::NamespacedId("noix", "debug-run"),
+        std::make_unique<debug::DebugRunCommand>(*_scriptEngine));
     _debugServer->start();
     core::Logger::instance().info("DebugServer started on port {}", port);
 }
 
+void Application::signalHandler(int) {
+    requestShutdown();
+}
+
+void Application::requestShutdown() {
+    if (_instance) {
+        _instance->_running.store(false);
+    }
+}
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+static BOOL WINAPI consoleCtrlHandler(DWORD ctrlType) {
+    if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT ||
+        ctrlType == CTRL_CLOSE_EVENT) {
+        noix::runtime::Application::requestShutdown();
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 int Application::run() {
+    _instance = this;
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
+#ifdef _WIN32
+    SetConsoleCtrlHandler(consoleCtrlHandler, true);
+#endif
     try {
     initLogger();
     if (!initCore()) { cleanup(); return 1; }
@@ -177,7 +260,7 @@ int Application::run() {
     {
         core::Config defaults;
         core::Config windowDefaults;
-        windowDefaults.setString("mode", "borderless");
+        windowDefaults.setString("mode", "windowed");
         windowDefaults.setString("resolution", "fhd");
         defaults.setObject("window", std::move(windowDefaults));
         _configManager->getOrDefault(core::NamespacedId("noix", "application"), defaults);
@@ -188,6 +271,7 @@ int Application::run() {
         if (!initWindow()) { cleanup(); return 1; }
     }
     initDebugServer();
+    _scriptEngine->start();
 
     core::Logger::instance().info("noix-engine started ({})",
         isHeadless() ? "server-only" : "full");
@@ -197,7 +281,13 @@ int Application::run() {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) _running.store(false);
             else if (event.type == _shutdownEventType) _running.store(false);
+            else if (event.type == _freezeEventType) _frozen.store(true);
+            else if (event.type == _resumeEventType) _frozen.store(false);
         }
+        if (!_frozen.load()) {
+            // 游戏逻辑刻（未来）
+        }
+        SDL_Delay(10);
     }
     core::Logger::instance().info("noix-engine shutting down");
     cleanup();
@@ -214,12 +304,14 @@ void Application::cleanup() {
     _cleanedUp = true;
     _debugServer.reset();
     _resourcePack.reset();
-    _jsEngine.reset();
+    _scriptEngine.reset();
     if (_configManager) {
         _configManager->saveAll();
         _configManager.reset();
     }
     if (_window) { SDL_DestroyWindow(_window); _window = nullptr; }
+    // 释放日志文件句柄后再 SDL_Quit
+    core::Logger::instance().clearSinks();
     if (_sdlInitialized) {
         SDL_Quit();
         _sdlInitialized = false;

@@ -16,6 +16,7 @@ public:
 
     void addSink(std::shared_ptr<Sink> sink);
     void removeSink(const std::shared_ptr<Sink>& sink);
+    void clearSinks();
     void setLevel(LogLevel level);
     LogLevel level() const { return _level.load(); }
 

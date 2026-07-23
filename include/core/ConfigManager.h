@@ -22,7 +22,7 @@ public:
     Config get(const NamespacedId& id) const;
     std::vector<NamespacedId> list() const;
 
-    /// 获取配置，不存在则用默认值创建并标记为 dirty（下次 saveAll 会写入磁盘）
+    /// 获取配置，不存在则用默认值创建并立即写入磁盘
     Config getOrDefault(const NamespacedId& id, const Config& defaultCfg);
 
     // --- 创建/写入 ---
@@ -49,6 +49,7 @@ private:
     };
 
     std::filesystem::path entryPath(const NamespacedId& id) const;
+    void saveToDisk(const NamespacedId& id, const std::filesystem::path& path);
 
     std::filesystem::path _configDir;
     mutable std::mutex _mutex;

@@ -3,7 +3,7 @@
 	url = https://github.com/libsdl-org/SDL
 [submodule "third_party/quickjs"]
 	path = third_party/quickjs
-	url = https://github.com/quickjs-ng/quickjs
+	url = https://github.com/AserJoker/quickjs.git
 [submodule "third_party/SDL_net"]
 	path = third_party/SDL_net
 	url = https://github.com/libsdl-org/SDL_net

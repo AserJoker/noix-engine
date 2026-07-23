@@ -33,14 +33,25 @@ add_executable(noix-engine
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
-    src/debug/DebugServer.cpp
+    src/debug/BreakpointCommand.cpp
     src/debug/ConfigGetCommand.cpp
+    src/debug/DebugControlCommand.cpp
+    src/debug/DebugEvalCommand.cpp
+    src/debug/DebugEvalFrameCommand.cpp
+    src/debug/DebugServer.cpp
+    src/debug/DebugStatusCommand.cpp
     src/debug/EvalCommand.cpp
     src/debug/HttpServer.cpp
     src/debug/ShutdownCommand.cpp
+    src/debug/StackTraceCommand.cpp
+    src/debug/DebugVariablesCommand.cpp
+    src/debug/SourceMapCommand.cpp
+    src/debug/DebugRunCommand.cpp
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
-    src/script/JSEngine.cpp
+    src/script/DebugAgent.cpp
+    src/script/NativeModules.cpp
+    src/script/ScriptEngine.cpp
 )
 
 target_include_directories(noix-engine PRIVATE
@@ -58,6 +69,9 @@ target_link_libraries(noix-engine PRIVATE
 set_target_properties(noix-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
+
+# ---- Debug Test ----
+add_subdirectory(tests/debug_test)
 
 # ---- Tests ----
 option(NOIX_BUILD_TESTS "Build tests" ON)

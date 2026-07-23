@@ -145,10 +145,14 @@ TEST_F(ConfigManagerTest, SaveAllOnlyDirty) {
     cfg2.setBool("enabled", true);
     mgr.set(NamespacedId("mymod", "settings"), std::move(cfg2));
 
-    EXPECT_EQ(mgr.saveAll(), 2);
-
-    // After saveAll, nothing is dirty
+    // set() 已经实时写入磁盘，saveAll 无 dirty 条目
     EXPECT_EQ(mgr.saveAll(), 0);
+
+    // 验证文件已在磁盘上
+    ConfigManager mgr2(_tempDir);
+    mgr2.loadAll();
+    EXPECT_TRUE(mgr2.has(NamespacedId("debug", "server")));
+    EXPECT_TRUE(mgr2.has(NamespacedId("mymod", "settings")));
 }
 
 TEST_F(ConfigManagerTest, RemoveEntry) {
@@ -198,15 +202,14 @@ TEST_F(ConfigManagerTest, GetOrDefaultReturnsExisting) {
     EXPECT_EQ(cfg.getInt("port").value_or(0), 8080);
 }
 
-TEST_F(ConfigManagerTest, GetOrDefaultMarksDirty) {
+TEST_F(ConfigManagerTest, GetOrDefaultWritesToDisk) {
     ConfigManager mgr(_tempDir);
     Config defaults;
     defaults.setInt("port", 9900);
 
     mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
-    EXPECT_EQ(mgr.saveAll(), 1);
 
-    // 验证文件已写入磁盘
+    // getOrDefault 已经实时写入磁盘
     ConfigManager mgr2(_tempDir);
     EXPECT_TRUE(mgr2.load(NamespacedId("debug", "server")));
     Config loaded = mgr2.get(NamespacedId("debug", "server"));

@@ -16,8 +16,6 @@ add_executable(test_unit
     unit/test_namespaced_id.cpp
     unit/test_resource_pack.cpp
     unit/test_sink.cpp
-    unit/test_js_engine.cpp
-    unit/test_command.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ArgsParser.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Config.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp
@@ -25,12 +23,8 @@ add_executable(test_unit
     ${CMAKE_SOURCE_DIR}/src/core/NamespacedId.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sink.cpp
     ${CMAKE_SOURCE_DIR}/src/resource/ResourcePack.cpp
-    ${CMAKE_SOURCE_DIR}/src/script/JSEngine.cpp
-    ${CMAKE_SOURCE_DIR}/src/debug/ConfigGetCommand.cpp
-    ${CMAKE_SOURCE_DIR}/src/debug/EvalCommand.cpp
-    ${CMAKE_SOURCE_DIR}/src/debug/ShutdownCommand.cpp
 )
-target_link_libraries(test_unit PRIVATE GTest::gtest_main SDL3::SDL3 qjs cjson)
+target_link_libraries(test_unit PRIVATE GTest::gtest_main SDL3::SDL3 cjson)
 target_include_directories(test_unit PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/third_party/cJSON
@@ -40,7 +34,6 @@ target_include_directories(test_unit PRIVATE
 add_executable(test_integration
     integration/helpers/HttpClient.cpp
     integration/test_debug_server.cpp
-    integration/test_js_eval.cpp
     integration/test_shutdown.cpp
 )
 target_link_libraries(test_integration PRIVATE GTest::gtest_main SDL3::SDL3 SDL3_net::SDL3_net)

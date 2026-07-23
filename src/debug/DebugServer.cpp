@@ -126,7 +126,9 @@ void DebugServer::sessionLoop() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::unique_lock lock(_sessionMutex);
+        _sessionCv.wait_for(lock, std::chrono::seconds(5),
+            [this] { return !_running.load(); });
     }
 }
 
@@ -275,6 +277,11 @@ void DebugServer::registerRoutes() {
 
         if (commandObj) {
             std::string result = commandObj->execute(argsStr);
+            // Try to parse result as JSON and embed as object; fall back to string
+            cJSON* resultObj = cJSON_Parse(result.c_str());
+            if (resultObj) {
+                return jsonSuccessObj(nspace, command, resultObj);
+            }
             return jsonSuccess(nspace, command, result);
         }
 
@@ -290,6 +297,7 @@ void DebugServer::start() {
 
 void DebugServer::stop() {
     _running.store(false);
+    _sessionCv.notify_one();
     _httpServer.stop();
     if (_sessionThread.joinable()) {
         _sessionThread.join();
