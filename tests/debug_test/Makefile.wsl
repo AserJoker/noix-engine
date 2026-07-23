@@ -2,22 +2,24 @@ CC = gcc
 CFLAGS = -g -O0 -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -D_GNU_SOURCE
 LDFLAGS = -lm -ldl -lpthread
 
+QJS = ../../third_party/quickjs
+
 all: test_debug
 
-quickjs.o: quickjs.c quickjs.h quickjs-opcode.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+quickjs.o: $(QJS)/quickjs.c $(QJS)/quickjs.h $(QJS)/quickjs-opcode.h
+	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
 
-quickjs-libc.o: quickjs-libc.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+quickjs-libc.o: $(QJS)/quickjs-libc.c
+	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
 
-libregexp.o: libregexp.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+libregexp.o: $(QJS)/libregexp.c
+	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
 
-libunicode.o: libunicode.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+libunicode.o: $(QJS)/libunicode.c
+	$(CC) $(CFLAGS) -I$(QJS) -c -o $@ $<
 
 test_debug: test_debug.c quickjs.o quickjs-libc.o libregexp.o libunicode.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -I$(QJS) -o $@ $^ $(LDFLAGS)
 
 valgrind: test_debug
 	valgrind --leak-check=full --error-exitcode=1 ./test_debug
