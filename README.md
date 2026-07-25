@@ -1,6 +1,6 @@
 # noix-engine
 
-A lightweight game engine built with C++20, featuring SDL3-based windowing, QuickJS scripting, and an HTTP-based remote debug protocol.
+A lightweight game engine built with C++20, featuring SDL3-based windowing, QuickJS scripting, and DAP-based remote debugging.
 
 ## Architecture
 
@@ -12,11 +12,9 @@ noix-engine
 │   ├── NamespacedId   Value type for namespace:name identifiers
 │   └── Sink           Output targets — ConsoleSink (colored) and FileSink (plain)
 ├── debug/         Remote debug service
-│   ├── HttpServer     Lightweight HTTP server built on SDL3_net (non-blocking, per-request close)
-│   ├── DebugServer    Session management and command dispatch
-│   ├── Command        Abstract base class for debug commands
-│   ├── EvalCommand    Evaluate JavaScript expressions via JSEngine
-│   └── ShutdownCommand  Trigger graceful engine shutdown via SDL event
+│   ├── DebugServer    Session management and command dispatch (HTTP-based)
+│   ├── DapTestBridge  Standalone DAP debug bridge for QuickJS (stdio protocol)
+│   └── JsDebugBridge  Thread model, command queue, event queue (shared by CDP/DAP)
 ├── resource/      Resource management
 │   └── ResourcePack   Multi-pack resource resolver with priority overlay
 ├── runtime/       Application lifecycle
@@ -27,35 +25,134 @@ noix-engine
 
 ## Dependencies
 
-All dependencies are included as git submodules under `third_party/`:
+All dependencies are included under `third_party/`:
 
 | Library | Purpose | License |
 |---------|---------|---------|
-| [SDL3](https://github.com/libsdl-org/SDL) | Window, input, event loop | zlib |
-| [SDL_net](https://github.com/libsdl-org/SDL_net) | TCP networking (HTTP server sockets) | zlib |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) | JavaScript engine | MIT |
 | [cJSON](https://github.com/DaveGamble/cJSON) | JSON parser/serializer | MIT |
+| [SDL3](https://github.com/libsdl-org/SDL) | Window, input, event loop | zlib |
+| [SDL_net](https://github.com/libsdl-org/SDL_net) | TCP networking (HTTP server sockets) | zlib |
 
 ## Build
 
-Requires CMake 3.20+, Clang (recommended), and Ninja.
+Requires CMake 3.20+ and a C++20 compiler (MSVC on Windows, Clang/GCC on Linux).
 
 ```bash
 git clone --recurse-submodules https://github.com/user/noix-engine.git
 cd noix-engine
 
+# Windows (MSVC)
+cmake -B build
+cmake --build build
+
+# Linux (Clang + Ninja)
 cmake -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 cmake --build build
 ```
 
-## Run
+Build outputs go to `dist/`:
+- `dist/noix-engine` — main engine executable
+- `dist/dap-test-bridge` — DAP debug bridge (standalone)
+
+## DAP Debug Bridge
+
+The `dap-test-bridge` is a standalone executable that wraps QuickJS with the Debug Adapter Protocol. It communicates over stdio using DAP's Content-Length framing, making it compatible with VS Code and other DAP clients.
+
+### Quick Start
 
 ```bash
-./build/noix-engine              # default debug port 9900
-./build/noix-engine --debug-port=8800
+# Build
+cmake --build build --target dap-test-bridge
+
+# Run with a JS script
+dist/dap-test-bridge --script path/to/script.js
 ```
 
-The engine opens an SDL3 window and starts an HTTP debug server. Close the window or send a shutdown command to exit.
+All scripts are evaluated as ES modules (`JS_EVAL_TYPE_MODULE`). Import statements are supported via a custom module loader that compiles imported modules with debug info so breakpoints work across files.
+
+### DAP Protocol Support
+
+| DAP Request | Behavior |
+|---|---|
+| `initialize` | Capability exchange (supports conditional breakpoints, exception filters, loaded sources) |
+| `launch` | Evaluate script as ES module with debug info |
+| `disconnect` | Resume execution and clean up |
+| `setBreakpoints` | Set/clear breakpoints; line correction for actual code positions |
+| `setExceptionBreakpoints` | Enable pause on uncaught or all exceptions |
+| `continue` | Resume execution |
+| `next` | Step over |
+| `stepIn` | Step into |
+| `stepOut` | Step out |
+| `pause` | Pause on next statement |
+| `stackTrace` | Capture call stack |
+| `scopes` | Get scope chain for a stack frame |
+| `variables` | List variables in a scope or expand object properties |
+| `evaluate` | Evaluate expression in frame scope (locals visible) |
+| `threads` | Return single "main" thread |
+| `loadedSources` | List loaded script files |
+
+### DAP Events
+
+| Event | Trigger |
+|---|---|
+| `stopped` | Breakpoint hit, step complete, debugger statement, exception |
+| `continued` | Execution resumed |
+| `terminated` | Script finished |
+| `output` | console.log output, stderr |
+| `loadedSource` | New script or imported module loaded |
+
+### Architecture
+
+```
+DAP Client (VS Code / test script)
+       ↕ stdio (Content-Length + JSON)
+  DapTestBridge
+       ↕
+  JsDebugBridge (thread model)
+    ├── command queue: main thread → script thread (via enqueueAndWait)
+    ├── event queue:  script thread → main thread (via pushEvent)
+    └── drainQueue:   script thread calls during pause loop
+       ↕
+  QuickJS Debug API (JS_Debug*)
+```
+
+### Known Limitations
+
+- **Module-scope variables in evaluate**: Frame-scoped eval injects frame locals into the global object before evaluation. Module-level variables (`var x = 10` at module top level) are NOT accessible from a function frame's eval — only the function's own locals are visible. This requires scope chain support (planned).
+- **Single thread**: QuickJS is single-threaded; DAP always reports one "main" thread.
+
+## Testing
+
+### DAP Protocol Tests
+
+Node.js tests in `tests/dap/` exercise the full DAP protocol by spawning `dap-test-bridge` as a child process.
+
+```bash
+# Run all DAP tests from project root
+node tests/dap/dap_client_test.js              # Full protocol test (21 checks)
+node tests/dap/dap_multifile_test.js            # Multi-file + ES module breakpoints
+node tests/dap/dap_esm_test.js                  # ES module import support
+node tests/dap/dap_obj_expansion_test.js        # Object/array property expansion
+node tests/dap/dap_eval_obj_expansion_test.js   # Evaluate + expand objects
+node tests/dap/dap_breakpoint_while_paused_test.js  # Add/remove breakpoints while paused
+node tests/dap/dap_var_test.js                  # Variable inspection
+node tests/dap/dap_varindex_test.js             # var/let/const mixed scope variables
+node tests/dap/dap_eval_strict2_test.js         # Eval in strict mode (let/const/var)
+node tests/dap/dap_tdz_test.js                  # TDZ (temporal dead zone) variable access
+```
+
+Test scripts that are loaded by the bridge go in `tests/dap/scripts/`. The shared `DapClient` helper is in `tests/dap/dap_client.js`.
+
+### C Debug API Tests
+
+Low-level QuickJS debug API tests in `tests/debug_test/`:
+
+```bash
+# Build on WSL
+cd tests/debug_test && make -f Makefile.wsl
+./test_debug
+```
 
 ## NamespacedId
 
@@ -160,9 +257,9 @@ log.error("init failed: {}", SDL_GetError());
 | Error     | Red     | Error conditions             |
 | Critical  | Bold Red | Fatal / unrecoverable       |
 
-## Debug Protocol
+## HTTP Debug Server
 
-The debug server exposes an HTTP API on the configured port. All request/response bodies use JSON.
+The engine also exposes an HTTP-based debug API on the configured port (default 9900). This is the legacy interface; the DAP bridge is the recommended path for IDE integration.
 
 ### Session Lifecycle
 
@@ -173,91 +270,29 @@ The debug server exposes an HTTP API on the configured port. All request/respons
 
 Sessions expire after 30 seconds of inactivity. Expired sessions must re-initialize.
 
-### Command System
-
-Debug commands are registered with `NamespacedId` keys using the `namespace:name` format:
-
-```cpp
-_debugServer->registerCommand(
-    core::NamespacedId("debug", "eval"),
-    std::make_unique<debug::EvalCommand>(*_jsEngine));
-```
-
-Commands are implemented as classes inheriting from `debug::Command`:
-
-```cpp
-class Command {
-public:
-    virtual ~Command() = default;
-    virtual std::string execute(const std::string& arguments) = 0;
-};
-```
-
 ### Endpoints
 
-#### GET /debug/handshake
-
-```json
-{"command":"handshake","namespace":"debug","result":{"name":"noix-engine","version":"0.1.0","protocol":"1.0"}}
-```
-
-#### POST /debug/initialize
-
-```bash
-curl -X POST http://localhost:9900/debug/initialize \
-  -H "Content-Type: application/json" \
-  -d '{"arguments":{"clientName":"my-client","clientVersion":"1.0"}}'
-```
-
-```json
-{"command":"initialize","namespace":"debug","result":{"sessionId":"a1b2c3d4...","timeoutSeconds":30,"commands":["debug:eval","debug:shutdown"]}}
-```
-
-#### POST /debug/disconnect
-
-```bash
-curl -X POST http://localhost:9900/debug/disconnect \
-  -d '{"arguments":{"sessionId":"<sessionId>"}}'
-```
-
-#### GET /debug/status
-
-```json
-{"command":"status","namespace":"debug","result":{"uptime":12.5,"sessions":1}}
-```
-
-#### GET /debug/ping
-
-```json
-{"pong":true}
-```
-
-#### POST /debug/command
-
-All commands require a valid `sessionId`.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/debug/handshake` | Server capabilities |
+| POST | `/debug/initialize` | Create session |
+| POST | `/debug/disconnect` | End session |
+| GET | `/debug/status` | Server status |
+| GET | `/debug/ping` | Health check |
+| POST | `/debug/command` | Execute a debug command |
 
 **eval** — evaluate a JavaScript expression:
 
 ```bash
 curl -X POST http://localhost:9900/debug/command \
-  -d '{"command":"eval","namespace":"debug","arguments":{"sessionId":"<sessionId>","expr":"1+2+3"}}'
+  -d '{"command":"eval","namespace":"debug","arguments":{"sessionId":"<sid>","expr":"1+2+3"}}'
 ```
 
-```json
-{"command":"eval","namespace":"debug","result":"6"}
-```
-
-**shutdown** — trigger graceful engine shutdown via SDL event:
+**shutdown** — trigger graceful engine shutdown:
 
 ```bash
 curl -X POST http://localhost:9900/debug/command \
-  -d '{"command":"shutdown","namespace":"debug","arguments":{"sessionId":"<sessionId>"}}'
-```
-
-### Error Response
-
-```json
-{"command":"eval","error":"session expired, please re-initialize"}
+  -d '{"command":"shutdown","namespace":"debug","arguments":{"sessionId":"<sid>"}}'
 ```
 
 ## Project Layout
@@ -267,50 +302,35 @@ noix-engine/
 ├── CMakeLists.txt
 ├── include/
 │   ├── core/
-│   │   ├── ArgsParser.h
-│   │   ├── Logger.h
-│   │   ├── NamespacedId.h
-│   │   └── Sink.h
-│   ├── debug/
-│   │   ├── Command.h
-│   │   ├── DebugServer.h
-│   │   ├── EvalCommand.h
-│   │   ├── HttpServer.h
-│   │   └── ShutdownCommand.h
+│   ├── debug/              Debug server + DAP bridge headers
 │   ├── resource/
-│   │   └── ResourcePack.h
 │   ├── runtime/
-│   │   └── Application.h
 │   └── script/
-│       └── JSEngine.h
 ├── src/
 │   ├── main.cpp
 │   ├── core/
-│   │   ├── ArgsParser.cpp
-│   │   ├── Logger.cpp
-│   │   ├── NamespacedId.cpp
-│   │   └── Sink.cpp
-│   ├── debug/
-│   │   ├── DebugServer.cpp
-│   │   ├── EvalCommand.cpp
-│   │   ├── HttpServer.cpp
-│   │   └── ShutdownCommand.cpp
+│   ├── debug/              Debug server + DAP/CDP bridge implementations
 │   ├── resource/
-│   │   └── ResourcePack.cpp
 │   ├── runtime/
-│   │   └── Application.cpp
 │   └── script/
-│       └── JSEngine.cpp
+├── tests/
+│   ├── dap/                DAP protocol tests (Node.js)
+│   │   ├── dap_client.js   Shared DAP client harness
+│   │   ├── *_test.js       Test runners
+│   │   └── scripts/        JS scripts loaded by the bridge
+│   ├── debug_test/         QuickJS debug API C tests
+│   ├── integration/        C++ integration tests
+│   └── unit/               C++ unit tests
 └── third_party/
-    ├── SDL/
-    ├── SDL_net/
-    ├── quickjs/
-    └── cJSON/
+    ├── quickjs/            QuickJS-ng (enhanced with debug API)
+    ├── cJSON/              JSON parser
+    ├── SDL/                SDL3
+    └── SDL_net/            SDL_net
 ```
 
 ## Conventions
 
-- C++20 standard, Clang + Ninja toolchain
+- C++20 standard, MSVC (Windows) / Clang + Ninja (Linux)
 - Headers in `include/<module>/`, sources in `src/<module>/`
 - Filenames match class names (e.g. `JSEngine.h`)
 - camelCase for functions, `_prefix` for private members
