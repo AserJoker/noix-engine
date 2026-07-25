@@ -21,7 +21,7 @@ static int g_max_pauses = 100; /* safety limit */
 
 static void debug_callback(JSRuntime *rt, JSDebugEventType event,
                            const char *filename, int line, int col,
-                           void *opaque)
+                           uint32_t bp_id, void *opaque)
 {
     g_pause_count++;
     g_last_event = event;

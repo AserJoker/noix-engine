@@ -5,3 +5,6 @@ dist/
 *.user
 CMakeSettings.json
 compile_commands.json
+.vscode
+.cac
+node_modules/
