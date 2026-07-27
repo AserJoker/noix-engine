@@ -3,9 +3,9 @@
 /*
  * DapTestBridge — Minimal DAP debug bridge for QuickJS.
  *
- * Communicates over stdin/stdout using the DAP wire protocol
- * (Content-Length header + JSON body). Provides just enough
- * DAP functionality to verify the QuickJS debug API enhancements.
+ * Communicates over stdin/stdout or TCP socket using the DAP wire protocol
+ * (Content-Length header + JSON body). Supports VS Code launch mode (stdio)
+ * and attach mode (TCP via --port).
  */
 
 #include "quickjs.h"

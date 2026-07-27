@@ -83,6 +83,8 @@ target_include_directories(dap-debug-bridge PRIVATE
 target_link_libraries(dap-debug-bridge PRIVATE
     qjs
     cjson
+    SDL3::SDL3
+    SDL3_net::SDL3_net
 )
 
 set_target_properties(dap-debug-bridge PROPERTIES

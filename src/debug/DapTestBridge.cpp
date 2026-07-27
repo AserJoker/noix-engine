@@ -1,8 +1,12 @@
 /*
  * DapTestBridge — Minimal DAP debug bridge for QuickJS.
  *
- * Reads DAP requests from stdin, dispatches to QuickJS debug API,
- * writes DAP responses/events to stdout.
+ * Reads DAP requests from stdin or TCP socket, dispatches to QuickJS debug API,
+ * writes DAP responses/events to stdout or TCP socket.
+ *
+ * Transport modes:
+ *   stdio (default)  —  for VS Code launch mode (DebugAdapterExecutable)
+ *   TCP (--port N)   —  for VS Code attach mode (DebugAdapterServer)
  *
  * Supported DAP requests:
  *   initialize, launch, disconnect, setBreakpoints,
@@ -10,7 +14,7 @@
  *   pause, stackTrace, scopes, variables, evaluate, threads,
  *   loadedSources
  *
- * Build: linked against quickjs (qjs) + cJSON
+ * Build: linked against quickjs (qjs) + cJSON + SDL3_net
  */
 
 #include "debug/DapTestBridge.h"
@@ -31,7 +35,21 @@
 #include <sstream>
 #include <functional>
 
-/* ---- DAP wire protocol helpers ---- */
+/* ---- SDL_net for TCP transport ---- */
+#include <SDL3/SDL.h>
+#include <SDL3_net/SDL_net.h>
+
+/* ---- DAP transport abstraction ---- */
+
+struct DapTransport {
+    /* Read a single byte. Returns -1 on EOF/error. */
+    int (*readByte)(void *ctx);
+    /* Write a complete DAP message (Content-Length + body). */
+    void (*writeMessage)(void *ctx, const std::string &msg);
+    void *ctx;
+};
+
+/* ---- Stdio transport ---- */
 
 #ifdef _WIN32
 #include <io.h>
@@ -48,23 +66,123 @@ static void init_stdio_binary() {
 #endif
 }
 
-/* Read a single byte from stdin. Returns -1 on EOF. */
-static int read_byte() {
+static int stdio_read_byte(void *ctx) {
+    (void)ctx;
     unsigned char c;
     size_t r = fread(&c, 1, 1, stdin);
     return r == 1 ? (int)c : -1;
 }
 
-static bool dap_read_message(std::string &out) {
+static void stdio_write_message(void *ctx, const std::string &msg) {
+    (void)ctx;
+    fprintf(stdout, "%s", msg.c_str());
+    fflush(stdout);
+}
+
+static void init_stdio_transport(DapTransport *t) {
+    t->readByte = stdio_read_byte;
+    t->writeMessage = stdio_write_message;
+    t->ctx = nullptr;
+}
+
+/* ---- TCP transport ---- */
+
+struct TcpCtx {
+    NET_Server *server = nullptr;
+    NET_StreamSocket *client = nullptr;
+    std::string recvBuffer;
+    int port = 0;
+};
+
+static int tcp_read_byte(void *ctx) {
+    auto *t = static_cast<TcpCtx *>(ctx);
+    while (t->recvBuffer.empty()) {
+        if (!t->client) return -1;
+        /* Block until data is available (1s timeout to check for errors) */
+        if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 1000))
+            return -1;
+        if (!t->client) return -1;
+        char buf[4096];
+        int n = NET_ReadFromStreamSocket(t->client, buf, sizeof(buf));
+        if (n > 0) {
+            t->recvBuffer.append(buf, n);
+        } else if (n < 0) {
+            return -1; /* connection closed or error */
+        }
+        /* n == 0: no data yet, loop and wait again */
+    }
+    int c = static_cast<unsigned char>(t->recvBuffer[0]);
+    t->recvBuffer.erase(0, 1);
+    return c;
+}
+
+static void tcp_write_message(void *ctx, const std::string &msg) {
+    auto *t = static_cast<TcpCtx *>(ctx);
+    if (!t->client) return;
+    NET_WriteToStreamSocket(t->client, msg.data(), static_cast<int>(msg.size()));
+    NET_WaitUntilStreamSocketDrained(t->client, 500);
+}
+
+static bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port) {
+    tcp->port = port;
+    tcp->server = nullptr;
+    tcp->client = nullptr;
+    tcp->recvBuffer.clear();
+
+    if (!NET_Init()) {
+        fprintf(stderr, "NET_Init failed: %s\n", SDL_GetError());
+        return false;
+    }
+
+    tcp->server = NET_CreateServer(nullptr, port, 0);
+    if (!tcp->server) {
+        fprintf(stderr, "NET_CreateServer failed: %s\n", SDL_GetError());
+        NET_Quit();
+        return false;
+    }
+
+    fprintf(stderr, "DAP bridge listening on port %d, waiting for connection...\n", port);
+
+    /* Wait for a single client connection (DAP is 1:1) */
+    while (!tcp->client) {
+        NET_AcceptClient(tcp->server, &tcp->client);
+        if (!tcp->client) {
+            SDL_Delay(50);
+        }
+    }
+
+    fprintf(stderr, "Client connected on port %d\n", port);
+
+    t->readByte = tcp_read_byte;
+    t->writeMessage = tcp_write_message;
+    t->ctx = tcp;
+    return true;
+}
+
+static void cleanup_tcp(TcpCtx *tcp) {
+    if (tcp->client) {
+        NET_DestroyStreamSocket(tcp->client);
+        tcp->client = nullptr;
+    }
+    if (tcp->server) {
+        NET_DestroyServer(tcp->server);
+        tcp->server = nullptr;
+    }
+    NET_Quit();
+}
+
+/* ---- DAP wire protocol helpers ---- */
+
+static bool dap_read_message(DapTransport &transport, std::string &out) {
     /* Read headers until empty line (\r\n\r\n) */
     int content_length = -1;
     std::string header_buf;
 
     while (true) {
-        int c = read_byte();
+        int c = transport.readByte(transport.ctx);
         if (c == -1) return false;
         if (c == '\r') {
-            int c2 = read_byte();
+            int c2 = transport.readByte(transport.ctx);
             if (c2 == '\n') {
                 /* End of header line */
                 if (header_buf.empty()) {
@@ -89,20 +207,18 @@ static bool dap_read_message(std::string &out) {
 
     out.resize(content_length);
     for (int i = 0; i < content_length; i++) {
-        int c = read_byte();
+        int c = transport.readByte(transport.ctx);
         if (c == -1) return false;
         out[i] = (char)c;
     }
     return true;
 }
 
-static std::mutex g_writeMutex;
-
-static void dap_write_message(const std::string &json) {
-    std::lock_guard<std::mutex> lk(g_writeMutex);
-    fprintf(stdout, "Content-Length: %zu\r\n\r\n", json.size());
-    fwrite(json.data(), 1, json.size(), stdout);
-    fflush(stdout);
+static void dap_write_message(DapTransport &transport, std::mutex &writeMutex,
+                               const std::string &json) {
+    std::lock_guard<std::mutex> lk(writeMutex);
+    std::string msg = "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n" + json;
+    transport.writeMessage(transport.ctx, msg);
 }
 
 /* ---- JSON helpers ---- */
@@ -136,6 +252,10 @@ struct DapBridge {
     bool launched = false;
     std::string scriptPath;
     bool stopOnEntry = false;
+
+    /* transport (stdio or TCP) */
+    DapTransport transport;
+    std::mutex writeMutex;
 
     /* thread management */
     std::thread scriptThread;
@@ -213,7 +333,7 @@ struct DapBridge {
         cJSON_Delete(msg);
         /* Write event immediately — it may be produced on the script thread
            while the main thread is blocked reading stdin. */
-        dap_write_message(json);
+        dap_write_message(transport, writeMutex, json);
     }
 
     void flushEvents() {
@@ -234,7 +354,7 @@ struct DapBridge {
         std::string json(s);
         cJSON_free(s);
         cJSON_Delete(msg);
-        dap_write_message(json);
+        dap_write_message(transport, writeMutex, json);
         flushEvents();
     }
 
@@ -1170,18 +1290,33 @@ static void dispatchRequest(cJSON *msg) {
 int dap_test_bridge_main(int argc, char **argv) {
     init_stdio_binary();
 
+    int port = 0; /* 0 = stdio mode */
+
     /* Parse arguments */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--script") == 0 && i + 1 < argc) {
             g_bridge.scriptPath = argv[++i];
         } else if (strcmp(argv[i], "--stop-on-entry") == 0) {
             g_bridge.stopOnEntry = true;
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            port = atoi(argv[++i]);
         }
     }
 
-    /* Read DAP messages from stdin */
+    /* Initialize transport */
+    TcpCtx tcpCtx;
+    if (port > 0) {
+        if (!init_tcp_transport(&g_bridge.transport, &tcpCtx, port)) {
+            fprintf(stderr, "Failed to initialize TCP transport on port %d\n", port);
+            return 1;
+        }
+    } else {
+        init_stdio_transport(&g_bridge.transport);
+    }
+
+    /* Read DAP messages */
     std::string message;
-    while (dap_read_message(message)) {
+    while (dap_read_message(g_bridge.transport, message)) {
         cJSON *msg = cJSON_Parse(message.c_str());
         if (!msg) {
             fprintf(stderr, "Failed to parse DAP message\n");
@@ -1203,6 +1338,10 @@ int dap_test_bridge_main(int argc, char **argv) {
     /* Cleanup */
     if (g_bridge.scriptThread.joinable())
         g_bridge.scriptThread.join();
+
+    if (port > 0) {
+        cleanup_tcp(&tcpCtx);
+    }
 
     return 0;
 }
