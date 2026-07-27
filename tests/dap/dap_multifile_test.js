@@ -24,6 +24,7 @@ async function runTest() {
         await client.sendRequest('initialize', { clientID: 'test', adapterID: 'noix', pathFormat: 'path' });
         await client.sendRequest('setBreakpoints', { source: { path: mainScript }, breakpoints: [{ line: 5 }] });
         await client.sendRequest('setBreakpoints', { source: { path: modScript }, breakpoints: [{ line: 3 }] });
+        await client.sendRequest('configurationDone');
         await client.sendRequest('launch', { script: mainScript, stopOnEntry: false });
 
         const stopped1 = await client.waitForEvent('stopped');

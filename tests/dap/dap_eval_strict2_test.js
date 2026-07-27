@@ -21,13 +21,15 @@ async function runTest() {
     try {
         await client.sendRequest('initialize', { clientID: 'test', adapterID: 'noix', pathFormat: 'path' });
         await client.sendRequest('setBreakpoints', { source: { path: scriptPath }, breakpoints: [{ line: 8 }] });
+        await client.sendRequest('configurationDone');
         await client.sendRequest('launch', { script: scriptPath, stopOnEntry: false });
         await client.waitForEvent('stopped');
         const st = await client.sendRequest('stackTrace', { threadId: 1, startFrame: 0, levels: 5 });
         const fid = st.body.stackFrames[0].id;
 
         const sc = await client.sendRequest('scopes', { frameId: fid });
-        const vr = sc.body.scopes[0].variablesReference;
+        const localScope = sc.body.scopes.find(s => s.name === 'Local') || sc.body.scopes[0];
+        const vr = localScope.variablesReference;
         const va = await client.sendRequest('variables', { variablesReference: vr });
         console.log('  Variables:', va.body.variables.map(v => `${v.name}=${v.value}`).join(', '));
 

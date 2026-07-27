@@ -22,6 +22,7 @@ async function runTest() {
     try {
         await client.sendRequest('initialize', { clientID: 'test', adapterID: 'noix', pathFormat: 'path' });
         await client.sendRequest('setBreakpoints', { source: { path: mainScript }, breakpoints: [{ line: 5 }] });
+        await client.sendRequest('configurationDone');
         await client.sendRequest('launch', { script: mainScript, stopOnEntry: false });
 
         const event = await Promise.race([

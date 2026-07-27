@@ -24,6 +24,8 @@ async function runTest() {
         const bp1 = await client.sendRequest('setBreakpoints', { source: { path: scriptPath }, breakpoints: [{ line: 8 }] });
         assert(bp1.success, 'setBreakpoints (line 8) succeeded');
 
+        await client.sendRequest('configurationDone');
+
         await client.sendRequest('launch', { script: scriptPath, stopOnEntry: false });
         const stop1 = await client.waitForEvent('stopped');
         assert(stop1.body.reason === 'breakpoint', 'first stop is breakpoint');

@@ -34,6 +34,11 @@
 #include <fstream>
 #include <sstream>
 #include <functional>
+#include <algorithm>
+#include <climits>
+
+/* ---- Global shutdown flag (accessible before DapBridge definition) ---- */
+static std::atomic<bool> g_shuttingDown{false};
 
 /* ---- SDL_net for TCP transport ---- */
 #include <SDL3/SDL.h>
@@ -97,11 +102,15 @@ struct TcpCtx {
 static int tcp_read_byte(void *ctx) {
     auto *t = static_cast<TcpCtx *>(ctx);
     while (t->recvBuffer.empty()) {
-        if (!t->client) return -1;
-        /* Block until data is available (1s timeout to check for errors) */
-        if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 1000))
-            return -1;
-        if (!t->client) return -1;
+        if (!t->client || g_shuttingDown.load()) return -1;
+        /* Wait up to 500ms for data; timeout is NOT an error — just retry.
+           This keeps the connection alive while the user is idle (e.g. between
+           clicking Step Over / Continue in VS Code). */
+        if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 500)) {
+            if (!t->client || g_shuttingDown.load()) return -1;
+            continue; /* Timeout — no data yet, retry */
+        }
+        if (!t->client || g_shuttingDown.load()) return -1;
         char buf[4096];
         int n = NET_ReadFromStreamSocket(t->client, buf, sizeof(buf));
         if (n > 0) {
@@ -250,8 +259,23 @@ struct DapBridge {
     int seq = 1;
     bool initialized = false;
     bool launched = false;
+    std::atomic<bool> running{false};
+    std::atomic<bool> configDone{false};
+    std::atomic<bool> firstStop{true}; /* first stop = "entry" reason per DAP convention */
     std::string scriptPath;
     bool stopOnEntry = false;
+
+    /* Pending stopped event — buffered until configurationDone is received.
+       DAP spec: stopped event should only be sent after configurationDone. */
+    struct PendingStop {
+        std::string reason;
+        int threadId = 0;
+        int line = 0;
+        int column = 0;
+        uint32_t bp_id = 0;
+        bool valid = false;
+    };
+    PendingStop pendingStop;
 
     /* transport (stdio or TCP) */
     DapTransport transport;
@@ -259,7 +283,7 @@ struct DapBridge {
 
     /* thread management */
     std::thread scriptThread;
-    std::atomic<bool> running{false};
+    std::thread handlerThread;
 
     /* command queue: main thread -> script thread */
     std::mutex cmdMutex;
@@ -269,6 +293,11 @@ struct DapBridge {
     /* event queue: script thread -> main thread */
     std::mutex evtMutex;
     std::vector<std::string> evtQueue;
+
+    /* async request queue: reader thread -> handler thread */
+    std::mutex reqMutex;
+    std::condition_variable reqCv;
+    std::queue<std::string> reqQueue;
 
     /* breakpoint tracking */
     struct Breakpoint {
@@ -331,6 +360,7 @@ struct DapBridge {
         std::string json(s);
         cJSON_free(s);
         cJSON_Delete(msg);
+        fprintf(stderr, "[DAP] <<< event: %s %s\n", eventType.c_str(), json.c_str());
         /* Write event immediately — it may be produced on the script thread
            while the main thread is blocked reading stdin. */
         dap_write_message(transport, writeMutex, json);
@@ -354,6 +384,7 @@ struct DapBridge {
         std::string json(s);
         cJSON_free(s);
         cJSON_Delete(msg);
+        fprintf(stderr, "[DAP] <<< response: %s\n", json.c_str());
         dap_write_message(transport, writeMutex, json);
         flushEvents();
     }
@@ -396,7 +427,12 @@ struct DapBridge {
                 self->cmdQueue.pop();
             }
         }
-        if (fn) fn();
+        if (fn) {
+            fprintf(stderr, "[DAP] drainQueue: executing command, queue remaining=%zu\n", self->cmdQueue.size());
+            fn();
+            fprintf(stderr, "[DAP] drainQueue: command done, debug_state=%d\n",
+                    self->rt ? JS_DebugGetState(self->rt) : -1);
+        }
     }
 
     /* debug callback: called on script thread */
@@ -414,7 +450,7 @@ struct DapBridge {
             reason = "step";
             break;
         case JS_DEBUG_EVENT_DEBUGGER_STMT:
-            reason = "debugger statement";
+            reason = "breakpoint";
             break;
         case JS_DEBUG_EVENT_EXCEPTION:
         case JS_DEBUG_EVENT_UNCAUGHT_EXCEPTION:
@@ -422,9 +458,33 @@ struct DapBridge {
             break;
         }
 
+        /* DAP convention: stop-on-entry uses reason "entry".
+           Only override the reason when stopOnEntry is set. */
+        if (self->stopOnEntry) {
+            reason = "entry";
+            self->stopOnEntry = false;
+        }
+
+        fprintf(stderr, "[DAP] debugCallback: event=%d reason=%s file=%s line=%d col=%d bp_id=%u debug_state=%d configDone=%d\n",
+                event, reason, filename ? filename : "(null)", line, col, bp_id,
+                rt ? JS_DebugGetState(rt) : -1, self->configDone.load());
+
+        if (!self->configDone.load()) {
+            /* Buffer the stopped event — send it after configurationDone */
+            fprintf(stderr, "[DAP] debugCallback: buffering stopped event (configDone not yet received)\n");
+            self->pendingStop.reason = reason;
+            self->pendingStop.threadId = 1;
+            self->pendingStop.line = line;
+            self->pendingStop.column = col;
+            self->pendingStop.bp_id = bp_id;
+            self->pendingStop.valid = true;
+            return;
+        }
+
         cJSON *body = cJSON_CreateObject();
         cJSON_AddStringToObject(body, "reason", reason);
         cJSON_AddNumberToObject(body, "threadId", 1);
+        cJSON_AddBoolToObject(body, "allThreadsStopped", true);
         if (bp_id > 0) {
             cJSON *ids = cJSON_CreateArray();
             cJSON_AddItemToArray(ids, cJSON_CreateNumber(bp_id));
@@ -572,6 +632,27 @@ static JSModuleDef *dap_module_loader(JSContext *ctx, const char *module_name,
 
 /* ---- DAP request handlers ---- */
 
+/* Convert a potentially relative path to absolute, using CWD.
+   Returns a thread-local static buffer — use immediately or copy. */
+static const char *toAbsolutePath(const char *path) {
+    if (!path || !path[0]) return path;
+    if (path[0] == '/' || path[0] == '\\' || (path[0] && path[1] == ':'))
+        return path; /* already absolute */
+    static thread_local char buf[_MAX_PATH];
+    if (_fullpath(buf, path, _MAX_PATH)) return buf;
+    return path;
+}
+
+/* Normalize a path for comparison: convert to absolute and normalize separators to '/' */
+static std::string normalizePath(const char *path) {
+    if (!path || !path[0]) return "";
+    std::string abs(toAbsolutePath(path));
+    std::replace(abs.begin(), abs.end(), '\\', '/');
+    /* Lowercase drive letter on Windows for consistency */
+    if (abs.size() >= 2 && abs[1] == ':') abs[0] = tolower(abs[0]);
+    return abs;
+}
+
 static void handleInitialize(cJSON *args, int requestSeq) {
     g_bridge.initialized = true;
 
@@ -581,7 +662,6 @@ static void handleInitialize(cJSON *args, int requestSeq) {
     cJSON_AddBoolToObject(body, "supportsExceptionInfoRequest", true);
     cJSON_AddBoolToObject(body, "supportsSetVariable", false);
     cJSON_AddBoolToObject(body, "supportsLoadedSourcesRequest", true);
-    cJSON_AddStringToObject(body, "exceptionBreakpointFilters", "");  // placeholder
 
     cJSON *filters = cJSON_CreateArray();
     {
@@ -599,19 +679,25 @@ static void handleInitialize(cJSON *args, int requestSeq) {
     cJSON_AddItemToObject(body, "exceptionBreakpointFilters", filters);
 
     g_bridge.sendResponse(requestSeq, "initialize", true, nullptr, body);
+
+    /* DAP protocol requires an 'initialized' event after the initialize response */
+    g_bridge.pushEvent("initialized", cJSON_CreateObject());
+    g_bridge.flushEvents();
 }
 
-static void handleLaunch(cJSON *args, int requestSeq) {
-    g_bridge.scriptPath = json_get_str(args, "script");
+static void handleLaunch(cJSON *args, int requestSeq, const char *commandName = "launch") {
+    const char *script = json_get_str(args, "script");
+    if (script && script[0]) g_bridge.scriptPath = normalizePath(script);
     g_bridge.stopOnEntry = json_get_bool(args, "stopOnEntry", false);
 
     if (g_bridge.scriptPath.empty()) {
-        g_bridge.sendResponse(requestSeq, "launch", false, "no script path", nullptr);
+        g_bridge.sendResponse(requestSeq, commandName, false, "no script path", nullptr);
         return;
     }
 
     g_bridge.launched = true;
     g_bridge.running = true;
+    g_bridge.firstStop = true;
 
     /* Start script thread */
     g_bridge.scriptThread = std::thread([]() {
@@ -640,27 +726,6 @@ static void handleLaunch(cJSON *args, int requestSeq) {
         /* Set module loader — custom loader adds JS_EVAL_FLAG_DEBUG_INFO
            so breakpoints work in imported modules */
         JS_SetModuleLoaderFunc(g_bridge.rt, nullptr, dap_module_loader, nullptr);
-
-        /* Apply pending breakpoints */
-        for (auto &pb : g_bridge.pendingBreakpoints) {
-            uint32_t id;
-            if (!pb.condition.empty()) {
-                id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, pb.filename.c_str(),
-                                                       pb.line, pb.condition.c_str());
-            } else {
-                id = JS_DebugSetBreakpoint(g_bridge.rt, pb.filename.c_str(), pb.line);
-            }
-            if (id > 0) {
-                DapBridge::Breakpoint b;
-                b.id = id;
-                b.filename = pb.filename;
-                b.line = pb.line;
-                b.condition = pb.condition;
-                b.verified = true;
-                g_bridge.breakpoints.push_back(b);
-            }
-        }
-        g_bridge.pendingBreakpoints.clear();
 
         /* Apply pending exception breakpoint state */
         if (g_bridge.pendingExceptionState > 0) {
@@ -717,6 +782,43 @@ static void handleLaunch(cJSON *args, int requestSeq) {
         if (!JS_IsException(mod_val)) {
             /* Set import.meta for the main module */
             dap_set_import_meta(g_bridge.ctx, mod_val, true);
+
+            /* Apply pending breakpoints now that the script is compiled and
+               registered with QuickJS. This resolves filenames to match
+               QuickJS internal names. */
+            {
+                JSDebugScriptInfo *scripts = nullptr;
+                int scriptCount = JS_DebugGetLoadedScripts(g_bridge.rt, &scripts);
+                for (auto &pb : g_bridge.pendingBreakpoints) {
+                    std::string resolvedPath = pb.filename;
+                    std::string normPb = normalizePath(pb.filename.c_str());
+                    for (int si = 0; si < scriptCount; si++) {
+                        if (normalizePath(scripts[si].filename) == normPb) {
+                            resolvedPath = scripts[si].filename;
+                            break;
+                        }
+                    }
+                    uint32_t id;
+                    if (!pb.condition.empty()) {
+                        id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, resolvedPath.c_str(),
+                                                               pb.line, pb.condition.c_str());
+                    } else {
+                        id = JS_DebugSetBreakpoint(g_bridge.rt, resolvedPath.c_str(), pb.line);
+                    }
+                    if (id > 0) {
+                        DapBridge::Breakpoint b;
+                        b.id = id;
+                        b.filename = resolvedPath;
+                        b.line = pb.line;
+                        b.condition = pb.condition;
+                        b.verified = true;
+                        g_bridge.breakpoints.push_back(b);
+                    }
+                }
+                if (scripts) JS_DebugFreeScriptInfo(g_bridge.rt, scripts, scriptCount);
+                g_bridge.pendingBreakpoints.clear();
+            }
+
             /* Evaluate the module — JS_EvalFunction executes the module and
                returns a Promise for async modules. */
             result = JS_EvalFunction(g_bridge.ctx, mod_val);
@@ -759,7 +861,7 @@ static void handleLaunch(cJSON *args, int requestSeq) {
         g_bridge.rt = nullptr;
     });
 
-    g_bridge.sendResponse(requestSeq, "launch", true, nullptr, nullptr);
+    g_bridge.sendResponse(requestSeq, commandName, true, nullptr, nullptr);
 }
 
 static void handleSetBreakpoints(cJSON *args, int requestSeq) {
@@ -784,13 +886,33 @@ static void handleSetBreakpoints(cJSON *args, int requestSeq) {
     /* Results array — filled during script-thread execution or for pending */
     cJSON *result = cJSON_CreateArray();
 
+    /* Normalize the client-provided path for comparison */
+    std::string normPath = normalizePath(path);
+
+    /* Helper: check if a breakpoint filename matches the client path */
+    auto pathMatches = [&](const std::string &bpFilename) -> bool {
+        return normalizePath(bpFilename.c_str()) == normPath;
+    };
+
     if (g_bridge.rt && g_bridge.running) {
         /* Runtime exists and script is running — do everything on the script thread
            to avoid race conditions and ensure breakpoint line correction works */
         g_bridge.enqueueAndWait([&]() {
+            /* Resolve client path to QuickJS internal filename */
+            std::string resolvedPath(path);
+            JSDebugScriptInfo *scripts = nullptr;
+            int scriptCount = JS_DebugGetLoadedScripts(g_bridge.rt, &scripts);
+            for (int si = 0; si < scriptCount; si++) {
+                if (normalizePath(scripts[si].filename) == normPath) {
+                    resolvedPath = scripts[si].filename;
+                    break;
+                }
+            }
+            if (scripts) JS_DebugFreeScriptInfo(g_bridge.rt, scripts, scriptCount);
+
             /* Remove existing breakpoints for this file */
             for (auto it = g_bridge.breakpoints.begin(); it != g_bridge.breakpoints.end(); ) {
-                if (it->filename == path) {
+                if (pathMatches(it->filename)) {
                     JS_DebugRemoveBreakpoint(g_bridge.rt, it->id);
                     it = g_bridge.breakpoints.erase(it);
                 } else {
@@ -802,15 +924,15 @@ static void handleSetBreakpoints(cJSON *args, int requestSeq) {
             for (auto &req : requestedBps) {
                 uint32_t id;
                 if (!req.condition.empty()) {
-                    id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, path, req.line, req.condition.c_str());
+                    id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, resolvedPath.c_str(), req.line, req.condition.c_str());
                 } else {
-                    id = JS_DebugSetBreakpoint(g_bridge.rt, path, req.line);
+                    id = JS_DebugSetBreakpoint(g_bridge.rt, resolvedPath.c_str(), req.line);
                 }
 
                 if (id > 0) {
                     DapBridge::Breakpoint b;
                     b.id = id;
-                    b.filename = path;
+                    b.filename = resolvedPath;
                     b.line = req.line;
                     b.condition = req.condition;
                     b.verified = true;
@@ -831,8 +953,20 @@ static void handleSetBreakpoints(cJSON *args, int requestSeq) {
         });
     } else if (g_bridge.rt) {
         /* Runtime exists but not running — set directly on main thread */
+        /* Resolve client path to QuickJS internal filename */
+        JSDebugScriptInfo *scripts = nullptr;
+        int scriptCount = JS_DebugGetLoadedScripts(g_bridge.rt, &scripts);
+        std::string resolvedPath(path);
+        for (int si = 0; si < scriptCount; si++) {
+            if (normalizePath(scripts[si].filename) == normPath) {
+                resolvedPath = scripts[si].filename;
+                break;
+            }
+        }
+        if (scripts) JS_DebugFreeScriptInfo(g_bridge.rt, scripts, scriptCount);
+
         for (auto it = g_bridge.breakpoints.begin(); it != g_bridge.breakpoints.end(); ) {
-            if (it->filename == path) {
+            if (pathMatches(it->filename)) {
                 JS_DebugRemoveBreakpoint(g_bridge.rt, it->id);
                 it = g_bridge.breakpoints.erase(it);
             } else {
@@ -842,14 +976,14 @@ static void handleSetBreakpoints(cJSON *args, int requestSeq) {
         for (auto &req : requestedBps) {
             uint32_t id;
             if (!req.condition.empty()) {
-                id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, path, req.line, req.condition.c_str());
+                id = JS_DebugSetConditionalBreakpoint(g_bridge.rt, resolvedPath.c_str(), req.line, req.condition.c_str());
             } else {
-                id = JS_DebugSetBreakpoint(g_bridge.rt, path, req.line);
+                id = JS_DebugSetBreakpoint(g_bridge.rt, resolvedPath.c_str(), req.line);
             }
             if (id > 0) {
                 DapBridge::Breakpoint b;
                 b.id = id;
-                b.filename = path;
+                b.filename = resolvedPath;
                 b.line = req.line;
                 b.condition = req.condition;
                 b.verified = true;
@@ -870,13 +1004,13 @@ static void handleSetBreakpoints(cJSON *args, int requestSeq) {
     } else {
         /* No runtime yet — save as pending */
         for (auto it = g_bridge.breakpoints.begin(); it != g_bridge.breakpoints.end(); ) {
-            if (it->filename == path)
+            if (pathMatches(it->filename))
                 it = g_bridge.breakpoints.erase(it);
             else
                 ++it;
         }
         for (auto it = g_bridge.pendingBreakpoints.begin(); it != g_bridge.pendingBreakpoints.end(); ) {
-            if (it->filename == path)
+            if (pathMatches(it->filename))
                 it = g_bridge.pendingBreakpoints.erase(it);
             else
                 ++it;
@@ -929,20 +1063,34 @@ static void handleSetExceptionBreakpoints(cJSON *args, int requestSeq) {
 }
 
 static void handleContinue(int requestSeq) {
+    fprintf(stderr, "[DAP] handleContinue: rt=%p\n", (void*)g_bridge.rt);
     g_bridge.enqueueAndWait([]() {
+        fprintf(stderr, "[DAP] enqueueAndWait: calling JS_DebugContinue, rt=%p\n", (void*)g_bridge.rt);
         JS_DebugContinue(g_bridge.rt);
     });
-    g_bridge.sendResponse(requestSeq, "continue", true, nullptr, nullptr);
+    fprintf(stderr, "[DAP] handleContinue: done\n");
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddBoolToObject(body, "allThreadsContinued", true);
+    g_bridge.sendResponse(requestSeq, "continue", true, nullptr, body);
 }
 
 static void handleNext(int requestSeq) {
+    fprintf(stderr, "[DAP] handleNext: enter, rt=%p, debug_state=%d\n",
+            (void*)g_bridge.rt, g_bridge.rt ? JS_DebugGetState(g_bridge.rt) : -1);
     g_bridge.enqueueAndWait([]() {
+        fprintf(stderr, "[DAP] handleNext: enqueueAndWait executing, calling JS_DebugStep\n");
         JS_DebugStep(g_bridge.rt, 1); /* step over */
+        fprintf(stderr, "[DAP] handleNext: JS_DebugStep done, debug_state=%d\n",
+                JS_DebugGetState(g_bridge.rt));
     });
+    fprintf(stderr, "[DAP] handleNext: enqueueAndWait returned\n");
     g_bridge.sendResponse(requestSeq, "next", true, nullptr, nullptr);
+    fprintf(stderr, "[DAP] handleNext: response sent\n");
 }
 
 static void handleStepIn(int requestSeq) {
+    fprintf(stderr, "[DAP] handleStepIn: enter, rt=%p, debug_state=%d\n",
+            (void*)g_bridge.rt, g_bridge.rt ? JS_DebugGetState(g_bridge.rt) : -1);
     g_bridge.enqueueAndWait([]() {
         JS_DebugStep(g_bridge.rt, 0); /* step into */
     });
@@ -950,6 +1098,8 @@ static void handleStepIn(int requestSeq) {
 }
 
 static void handleStepOut(int requestSeq) {
+    fprintf(stderr, "[DAP] handleStepOut: enter, rt=%p, debug_state=%d\n",
+            (void*)g_bridge.rt, g_bridge.rt ? JS_DebugGetState(g_bridge.rt) : -1);
     g_bridge.enqueueAndWait([]() {
         JS_DebugStep(g_bridge.rt, 2); /* step out */
     });
@@ -984,8 +1134,10 @@ static void handleStackTrace(cJSON *args, int requestSeq) {
         cJSON_AddNumberToObject(f, "id", i);
         cJSON_AddStringToObject(f, "name", frames[i].func_name ? frames[i].func_name : "<anonymous>");
         cJSON *src = cJSON_CreateObject();
-        cJSON_AddStringToObject(src, "name", frames[i].filename ? frames[i].filename : "<unknown>");
-        cJSON_AddStringToObject(src, "path", frames[i].filename ? frames[i].filename : "<unknown>");
+        const char *fname = frames[i].filename ? frames[i].filename : "<unknown>";
+        cJSON_AddStringToObject(src, "name", fname);
+        cJSON_AddStringToObject(src, "path", toAbsolutePath(fname));
+        cJSON_AddNumberToObject(src, "sourceReference", 0);
         cJSON_AddItemToObject(f, "source", src);
         cJSON_AddNumberToObject(f, "line", frames[i].line);
         cJSON_AddNumberToObject(f, "column", frames[i].col);
@@ -1000,6 +1152,16 @@ static void handleStackTrace(cJSON *args, int requestSeq) {
     g_bridge.sendResponse(requestSeq, "stackTrace", true, nullptr, body);
 }
 
+/* Scope varRef encoding:
+   Local scope:    frameId * 100 + 1
+   Closure scope:  frameId * 100 + 2  (only if closure vars exist)
+   Global scope:   frameId * 100 + 3  (only if global scope present)
+   Object expand:  >= 100000           (handled separately)
+*/
+static const int SCOPE_REF_LOCAL    = 1;
+static const int SCOPE_REF_CLOSURE  = 2;
+static const int SCOPE_REF_GLOBAL   = 3;
+
 static void handleScopes(cJSON *args, int requestSeq) {
     int frameId = json_get_int(args, "frameId", 0);
 
@@ -1011,14 +1173,55 @@ static void handleScopes(cJSON *args, int requestSeq) {
     });
 
     cJSON *scopesArr = cJSON_CreateArray();
+
+    /* We categorize scopes into: Closure (any that are before the frame's
+       own scopes), Local (the frame's own scopes), and Global.
+       We merge adjacent scopes of the same category into one DAP scope. */
+    bool hasLocal = false, hasClosure = false, hasGlobal = false;
+    int localVarCount = 0, closureVarCount = 0;
+
     for (int i = 0; i < scopeCount; i++) {
+        if (scopes[i].scope_level == -1) {
+            hasGlobal = true;
+        } else {
+            const char *cat = scopes[i].name ? scopes[i].name : "Local";
+            if (strcmp(cat, "Closure") == 0) {
+                hasClosure = true;
+                closureVarCount += scopes[i].var_count;
+            } else {
+                hasLocal = true;
+                localVarCount += scopes[i].var_count;
+            }
+        }
+    }
+
+    /* Add Closure scope first (if any) */
+    if (hasClosure) {
         cJSON *s = cJSON_CreateObject();
-        cJSON_AddStringToObject(s, "name", scopes[i].name ? scopes[i].name : "Local");
-        /* encode frameId + scopeIdx into a variablesReference */
-        int varRef = (frameId * 100) + i + 1;
-        cJSON_AddNumberToObject(s, "variablesReference", varRef);
-        cJSON_AddNumberToObject(s, "namedVariables", scopes[i].var_count);
+        cJSON_AddStringToObject(s, "name", "Closure");
+        cJSON_AddNumberToObject(s, "variablesReference", frameId * 100 + SCOPE_REF_CLOSURE);
+        cJSON_AddNumberToObject(s, "namedVariables", closureVarCount);
+        cJSON_AddStringToObject(s, "presentationHint", "closure");
+        cJSON_AddItemToArray(scopesArr, s);
+    }
+
+    /* Add Local scope */
+    if (hasLocal) {
+        cJSON *s = cJSON_CreateObject();
+        cJSON_AddStringToObject(s, "name", "Local");
+        cJSON_AddNumberToObject(s, "variablesReference", frameId * 100 + SCOPE_REF_LOCAL);
+        cJSON_AddNumberToObject(s, "namedVariables", localVarCount);
         cJSON_AddStringToObject(s, "presentationHint", "locals");
+        cJSON_AddItemToArray(scopesArr, s);
+    }
+
+    /* Add Global scope */
+    if (hasGlobal) {
+        cJSON *s = cJSON_CreateObject();
+        cJSON_AddStringToObject(s, "name", "Global");
+        cJSON_AddNumberToObject(s, "variablesReference", frameId * 100 + SCOPE_REF_GLOBAL);
+        cJSON_AddNumberToObject(s, "namedVariables", 0);
+        cJSON_AddStringToObject(s, "presentationHint", "globals");
         cJSON_AddItemToArray(scopesArr, s);
     }
 
@@ -1029,27 +1232,31 @@ static void handleScopes(cJSON *args, int requestSeq) {
     g_bridge.sendResponse(requestSeq, "scopes", true, nullptr, body);
 }
 
-static void formatJSValue(cJSON *v, JSValue val) {
+static void formatJSValue(cJSON *v, JSValue val, const char *valueKey = "value") {
     if (JS_IsNumber(val)) {
         double d;
         JS_ToFloat64(g_bridge.ctx, &d, val);
         char buf[64];
         snprintf(buf, sizeof(buf), "%g", d);
-        cJSON_AddStringToObject(v, "value", buf);
+        cJSON_AddStringToObject(v, valueKey, buf);
         cJSON_AddStringToObject(v, "type", "number");
     } else if (JS_IsBool(val)) {
-        cJSON_AddStringToObject(v, "value", JS_ToBool(g_bridge.ctx, val) ? "true" : "false");
+        cJSON_AddStringToObject(v, valueKey, JS_ToBool(g_bridge.ctx, val) ? "true" : "false");
         cJSON_AddStringToObject(v, "type", "boolean");
     } else if (JS_IsString(val)) {
         const char *s = JS_ToCString(g_bridge.ctx, val);
-        cJSON_AddStringToObject(v, "value", s ? s : "\"\"");
+        cJSON_AddStringToObject(v, valueKey, s ? s : "\"\"");
         cJSON_AddStringToObject(v, "type", "string");
         JS_FreeCString(g_bridge.ctx, s);
     } else if (JS_IsNull(val)) {
-        cJSON_AddStringToObject(v, "value", "null");
+        cJSON_AddStringToObject(v, valueKey, "null");
         cJSON_AddStringToObject(v, "type", "null");
     } else if (JS_IsUndefined(val)) {
-        cJSON_AddStringToObject(v, "value", "undefined");
+        cJSON_AddStringToObject(v, valueKey, "undefined");
+        cJSON_AddStringToObject(v, "type", "undefined");
+    } else if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED) {
+        /* TDZ — let/const variable not yet initialized */
+        cJSON_AddStringToObject(v, valueKey, "<uninitialized>");
         cJSON_AddStringToObject(v, "type", "undefined");
     } else if (JS_IsObject(val)) {
         /* Check for specific object types */
@@ -1067,19 +1274,19 @@ static void formatJSValue(cJSON *v, JSValue val) {
             JS_FreeAtom(g_bridge.ctx, lengthAtom);
             char buf[64];
             snprintf(buf, sizeof(buf), "Array(%u)", len);
-            cJSON_AddStringToObject(v, "value", buf);
+            cJSON_AddStringToObject(v, valueKey, buf);
             cJSON_AddStringToObject(v, "type", "object");
+        } else if (JS_IsFunction(g_bridge.ctx, val)) {
+            cJSON_AddStringToObject(v, valueKey, "function");
+            cJSON_AddStringToObject(v, "type", "function");
         } else {
-            cJSON_AddStringToObject(v, "value", "Object");
+            cJSON_AddStringToObject(v, valueKey, "Object");
             cJSON_AddStringToObject(v, "type", "object");
         }
         int objRef = g_bridge.addObjectRef(JS_DupValue(g_bridge.ctx, val));
         cJSON_AddNumberToObject(v, "variablesReference", objRef);
-    } else if (JS_IsFunction(g_bridge.ctx, val)) {
-        cJSON_AddStringToObject(v, "value", "function");
-        cJSON_AddStringToObject(v, "type", "function");
     } else {
-        cJSON_AddStringToObject(v, "value", "[unknown]");
+        cJSON_AddStringToObject(v, valueKey, "[unknown]");
     }
 }
 
@@ -1123,30 +1330,132 @@ static void handleVariables(cJSON *args, int requestSeq) {
         return;
     }
 
-    /* Frame variables */
-    int frameId = (varRef - 1) / 100;
+    /* Decode frameId and scope type from varRef.
+       Encoding: frameId * 100 + SCOPE_REF_{LOCAL,CLOSURE,GLOBAL} */
+    int frameId = varRef / 100;
+    int scopeType = varRef % 100;
 
-    JSDebugVarInfo *vars = nullptr;
-    int varCount = 0;
+    if (scopeType == SCOPE_REF_GLOBAL) {
+        /* Enumerate global object properties */
+        cJSON *varsArr = cJSON_CreateArray();
+        g_bridge.enqueueAndWait([&]() {
+            JSValue globalObj = JS_GetGlobalObject(g_bridge.ctx);
+            JSPropertyEnum *props = nullptr;
+            uint32_t propCount = 0;
+            JS_GetOwnPropertyNames(g_bridge.ctx, &props, &propCount, globalObj,
+                                   JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY);
+            for (uint32_t i = 0; i < propCount; i++) {
+                const char *name = JS_AtomToCString(g_bridge.ctx, props[i].atom);
+                JSValue propVal = JS_GetProperty(g_bridge.ctx, globalObj, props[i].atom);
 
-    g_bridge.enqueueAndWait([&]() {
-        varCount = JS_DebugGetFrameLocals(g_bridge.rt, frameId, &vars);
-    });
+                cJSON *v = cJSON_CreateObject();
+                cJSON_AddStringToObject(v, "name", name ? name : "");
+                formatJSValue(v, propVal);
+                if (!JS_IsObject(propVal)) {
+                    cJSON_AddNumberToObject(v, "variablesReference", 0);
+                }
+                cJSON_AddItemToArray(varsArr, v);
 
-    cJSON *varsArr = cJSON_CreateArray();
-    for (int i = 0; i < varCount; i++) {
-        cJSON *v = cJSON_CreateObject();
-        cJSON_AddStringToObject(v, "name", vars[i].name ? vars[i].name : "<var>");
-
-        formatJSValue(v, vars[i].value);
-        if (!JS_IsObject(vars[i].value)) {
-            cJSON_AddNumberToObject(v, "variablesReference", 0);
-        }
-
-        cJSON_AddItemToArray(varsArr, v);
+                JS_FreeCString(g_bridge.ctx, name);
+                JS_FreeValue(g_bridge.ctx, propVal);
+                JS_FreeAtom(g_bridge.ctx, props[i].atom);
+            }
+            js_free(g_bridge.ctx, props);
+            JS_FreeValue(g_bridge.ctx, globalObj);
+        });
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddItemToObject(body, "variables", varsArr);
+        g_bridge.sendResponse(requestSeq, "variables", true, nullptr, body);
+        return;
     }
 
-    if (vars) JS_DebugFreeVarInfo(g_bridge.ctx, vars, varCount);
+    if (scopeType == SCOPE_REF_CLOSURE) {
+        /* Closure scope: collect variables from enclosing frames.
+           Walk the call stack from outermost to the frame just above the
+           current one, collecting their locals. Inner frame vars override
+           outer ones (same name). */
+        cJSON *varsArr = cJSON_CreateArray();
+        g_bridge.enqueueAndWait([&]() {
+            /* Determine total frame count */
+            int totalFrames = 0;
+            for (int f = 0; ; f++) {
+                JSDebugVarInfo *test = nullptr;
+                int fc = JS_DebugGetFrameLocals(g_bridge.rt, f, &test);
+                if (fc < 0) break;
+                if (test) JS_DebugFreeVarInfo(g_bridge.ctx, test, fc);
+                totalFrames++;
+            }
+
+            /* Collect from outer frames (frames deeper than frameId) */
+            std::vector<std::pair<std::string, JSValue>> closureVars;
+            for (int f = totalFrames - 1; f > frameId; f--) {
+                JSDebugVarInfo *fvars = nullptr;
+                int fvarCount = JS_DebugGetFrameLocals(g_bridge.rt, f, &fvars);
+                for (int j = 0; j < fvarCount; j++) {
+                    if (fvars[j].name)
+                        closureVars.push_back({fvars[j].name, JS_DupValue(g_bridge.ctx, fvars[j].value)});
+                }
+                if (fvars) JS_DebugFreeVarInfo(g_bridge.ctx, fvars, fvarCount);
+            }
+
+            /* Deduplicate: keep last occurrence (innermost frame wins) */
+            std::vector<bool> skip(closureVars.size(), false);
+            for (int a = 0; a < (int)closureVars.size(); a++) {
+                for (int b = a + 1; b < (int)closureVars.size(); b++) {
+                    if (!skip[b] && closureVars[a].first == closureVars[b].first)
+                        skip[a] = true;
+                }
+            }
+
+            for (int a = 0; a < (int)closureVars.size(); a++) {
+                if (skip[a]) {
+                    JS_FreeValue(g_bridge.ctx, closureVars[a].second);
+                    continue;
+                }
+                cJSON *v = cJSON_CreateObject();
+                cJSON_AddStringToObject(v, "name", closureVars[a].first.c_str());
+                formatJSValue(v, closureVars[a].second);
+                if (!JS_IsObject(closureVars[a].second)) {
+                    cJSON_AddNumberToObject(v, "variablesReference", 0);
+                }
+                cJSON_AddItemToArray(varsArr, v);
+                JS_FreeValue(g_bridge.ctx, closureVars[a].second);
+            }
+        });
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddItemToObject(body, "variables", varsArr);
+        g_bridge.sendResponse(requestSeq, "variables", true, nullptr, body);
+        return;
+    }
+
+    /* SCOPE_REF_LOCAL: return ALL frame locals for this frame.
+       QuickJS's per-scope var_start/var_count tracking is unreliable,
+       so for Local scopes we just return the full flat variable list
+       from JS_DebugGetFrameLocals. This ensures all local variables
+       are visible even when the scope partitioning is incorrect.
+
+       IMPORTANT: All QuickJS API calls (including formatJSValue which
+       calls JS_IsObject, JS_DupValue etc.) must run inside enqueueAndWait
+       on the script thread. */
+    cJSON *varsArr = cJSON_CreateArray();
+    g_bridge.enqueueAndWait([&]() {
+        JSDebugVarInfo *vars = nullptr;
+        int varCount = JS_DebugGetFrameLocals(g_bridge.rt, frameId, &vars);
+
+        for (int i = 0; i < varCount; i++) {
+            cJSON *v = cJSON_CreateObject();
+            cJSON_AddStringToObject(v, "name", vars[i].name ? vars[i].name : "<var>");
+
+            formatJSValue(v, vars[i].value);
+            if (!JS_IsObject(vars[i].value)) {
+                cJSON_AddNumberToObject(v, "variablesReference", 0);
+            }
+
+            cJSON_AddItemToArray(varsArr, v);
+        }
+
+        if (vars) JS_DebugFreeVarInfo(g_bridge.ctx, vars, varCount);
+    });
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddItemToObject(body, "variables", varsArr);
@@ -1168,16 +1477,11 @@ static void handleEvaluate(cJSON *args, int requestSeq) {
 
     cJSON *body = cJSON_CreateObject();
     if (success) {
-        const char *str = JS_ToCString(g_bridge.ctx, result);
-        cJSON_AddStringToObject(body, "result", str ? str : "undefined");
-        if (JS_IsObject(result)) {
-            int objRef = g_bridge.addObjectRef(JS_DupValue(g_bridge.ctx, result));
-            cJSON_AddNumberToObject(body, "variablesReference", objRef);
-            cJSON_AddStringToObject(body, "type", "object");
-        } else {
+        formatJSValue(body, result, "result");
+        if (!JS_IsObject(result)) {
             cJSON_AddNumberToObject(body, "variablesReference", 0);
         }
-        JS_FreeCString(g_bridge.ctx, str);
+        /* objects already have variablesReference set by formatJSValue */
     } else {
         JSValue exc = JS_GetException(g_bridge.ctx);
         const char *str = JS_ToCString(g_bridge.ctx, exc);
@@ -1201,6 +1505,31 @@ static void handleThreads(int requestSeq) {
     g_bridge.sendResponse(requestSeq, "threads", true, nullptr, body);
 }
 
+static void handleSource(cJSON *args, int requestSeq) {
+    cJSON *srcArg = json_get(args, "source");
+    const char *path = json_get_str(srcArg, "path");
+
+    if (!path || !path[0]) {
+        g_bridge.sendResponse(requestSeq, "source", false, "no source path", nullptr);
+        return;
+    }
+
+    /* Read the file from disk */
+    const char *absPath = toAbsolutePath(path);
+    std::ifstream file(absPath);
+    if (!file.is_open()) {
+        g_bridge.sendResponse(requestSeq, "source", false, "cannot open file", nullptr);
+        return;
+    }
+    std::stringstream ss;
+    ss << file.rdbuf();
+
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "content", ss.str().c_str());
+    cJSON_AddStringToObject(body, "mimeType", "text/javascript");
+    g_bridge.sendResponse(requestSeq, "source", true, nullptr, body);
+}
+
 static void handleLoadedSources(int requestSeq) {
     JSDebugScriptInfo *scripts = nullptr;
     int count = 0;
@@ -1213,7 +1542,7 @@ static void handleLoadedSources(int requestSeq) {
     for (int i = 0; i < count; i++) {
         cJSON *s = cJSON_CreateObject();
         cJSON_AddStringToObject(s, "name", scripts[i].filename);
-        cJSON_AddStringToObject(s, "path", scripts[i].filename);
+        cJSON_AddStringToObject(s, "path", toAbsolutePath(scripts[i].filename));
         cJSON_AddNumberToObject(s, "sourceReference", 0);
         cJSON_AddItemToArray(sources, s);
     }
@@ -1226,17 +1555,23 @@ static void handleLoadedSources(int requestSeq) {
 }
 
 static void handleDisconnect(int requestSeq) {
+    fprintf(stderr, "[DAP] handleDisconnect: enter, running=%d, rt=%p\n",
+            g_bridge.running.load(), (void*)g_bridge.rt);
     g_bridge.running = false;
+    g_shuttingDown = true;
 
     if (g_bridge.rt) {
         JS_DebugContinue(g_bridge.rt);
         JS_SetDebugCallback(g_bridge.rt, nullptr, nullptr);
     }
 
-    if (g_bridge.scriptThread.joinable())
-        g_bridge.scriptThread.join();
-
+    /* Send response before waiting for thread — client expects immediate ack */
     g_bridge.sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
+    fprintf(stderr, "[DAP] handleDisconnect: response sent\n");
+
+    /* Note: don't join scriptThread here — the main function handles cleanup.
+       The reader thread will exit due to g_shuttingDown, and the main function
+       will join all threads. */
 }
 
 /* ---- Request dispatch ---- */
@@ -1246,10 +1581,15 @@ static void dispatchRequest(cJSON *msg) {
     const char *command = json_get_str(msg, "command");
     cJSON *args = json_get(msg, "arguments");
 
+    fprintf(stderr, "[DAP] >>> request: seq=%d command=%s\n", requestSeq, command);
+
     if (strcmp(command, "initialize") == 0) {
         handleInitialize(args, requestSeq);
     } else if (strcmp(command, "launch") == 0) {
         handleLaunch(args, requestSeq);
+    } else if (strcmp(command, "attach") == 0) {
+        /* attach reuses launch logic; script path comes from --script CLI arg */
+        handleLaunch(args, requestSeq, "attach");
     } else if (strcmp(command, "disconnect") == 0) {
         handleDisconnect(requestSeq);
     } else if (strcmp(command, "setBreakpoints") == 0) {
@@ -1257,7 +1597,23 @@ static void dispatchRequest(cJSON *msg) {
     } else if (strcmp(command, "setExceptionBreakpoints") == 0) {
         handleSetExceptionBreakpoints(args, requestSeq);
     } else if (strcmp(command, "configurationDone") == 0) {
+        g_bridge.configDone = true;
         g_bridge.sendResponse(requestSeq, "configurationDone", true, nullptr, nullptr);
+        /* If a stopped event was buffered before configurationDone, send it now */
+        if (g_bridge.pendingStop.valid) {
+            fprintf(stderr, "[DAP] configurationDone: sending buffered stopped event\n");
+            cJSON *body = cJSON_CreateObject();
+            cJSON_AddStringToObject(body, "reason", g_bridge.pendingStop.reason.c_str());
+            cJSON_AddNumberToObject(body, "threadId", g_bridge.pendingStop.threadId);
+            cJSON_AddBoolToObject(body, "allThreadsStopped", true);
+            if (g_bridge.pendingStop.bp_id > 0) {
+                cJSON *ids = cJSON_CreateArray();
+                cJSON_AddItemToArray(ids, cJSON_CreateNumber(g_bridge.pendingStop.bp_id));
+                cJSON_AddItemToObject(body, "hitBreakpointIds", ids);
+            }
+            g_bridge.pushEvent("stopped", body);
+            g_bridge.pendingStop.valid = false;
+        }
     } else if (strcmp(command, "continue") == 0) {
         handleContinue(requestSeq);
     } else if (strcmp(command, "next") == 0) {
@@ -1280,7 +1636,10 @@ static void dispatchRequest(cJSON *msg) {
         handleThreads(requestSeq);
     } else if (strcmp(command, "loadedSources") == 0) {
         handleLoadedSources(requestSeq);
+    } else if (strcmp(command, "source") == 0) {
+        handleSource(args, requestSeq);
     } else {
+        fprintf(stderr, "[DAP] unknown command: %s\n", command);
         g_bridge.sendResponse(requestSeq, command, false, "unknown command", nullptr);
     }
 }
@@ -1300,7 +1659,16 @@ int dap_test_bridge_main(int argc, char **argv) {
             g_bridge.stopOnEntry = true;
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
+        } else if (argv[i][0] != '-') {
+            /* Positional argument: treat as script path */
+            if (g_bridge.scriptPath.empty()) g_bridge.scriptPath = argv[i];
         }
+    }
+
+    /* Normalize scriptPath to absolute with '/' separators */
+    if (!g_bridge.scriptPath.empty()) {
+        std::string norm = normalizePath(g_bridge.scriptPath.c_str());
+        g_bridge.scriptPath = norm;
     }
 
     /* Initialize transport */
@@ -1314,28 +1682,63 @@ int dap_test_bridge_main(int argc, char **argv) {
         init_stdio_transport(&g_bridge.transport);
     }
 
-    /* Read DAP messages */
+    /* ---- Handler thread: processes DAP requests from the request queue ---- */
+    g_bridge.handlerThread = std::thread([]() {
+        while (true) {
+            std::string message;
+            {
+                std::unique_lock<std::mutex> lk(g_bridge.reqMutex);
+                g_bridge.reqCv.wait(lk, []() {
+                    return !g_bridge.reqQueue.empty() || g_shuttingDown.load();
+                });
+                if (g_shuttingDown.load() && g_bridge.reqQueue.empty()) break;
+                message = std::move(g_bridge.reqQueue.front());
+                g_bridge.reqQueue.pop();
+            }
+
+            cJSON *msg = cJSON_Parse(message.c_str());
+            if (!msg) {
+                fprintf(stderr, "Failed to parse DAP message\n");
+                continue;
+            }
+
+            const char *type = json_get_str(msg, "type");
+            if (strcmp(type, "request") == 0) {
+                dispatchRequest(msg);
+            }
+
+            cJSON_Delete(msg);
+        }
+        fprintf(stderr, "[DAP] handler thread exiting\n");
+    });
+
+    /* ---- Main thread: reads DAP messages from transport, pushes to queue ---- */
     std::string message;
     while (dap_read_message(g_bridge.transport, message)) {
-        cJSON *msg = cJSON_Parse(message.c_str());
-        if (!msg) {
-            fprintf(stderr, "Failed to parse DAP message\n");
-            continue;
+        {
+            std::lock_guard<std::mutex> lk(g_bridge.reqMutex);
+            g_bridge.reqQueue.push(std::move(message));
         }
-
-        const char *type = json_get_str(msg, "type");
-        if (strcmp(type, "request") == 0) {
-            dispatchRequest(msg);
-        }
-
-        cJSON_Delete(msg);
+        g_bridge.reqCv.notify_one();
         message.clear();
-
-        if (!g_bridge.running && g_bridge.launched)
-            break;
     }
 
-    /* Cleanup */
+    fprintf(stderr, "[DAP] reader loop exited\n");
+
+    /* Signal handler thread to stop */
+    g_shuttingDown = true;
+    g_bridge.reqCv.notify_one();
+
+    /* If script is still running, unblock it so it can finish */
+    if (g_bridge.rt && g_bridge.running.load()) {
+        JS_DebugContinue(g_bridge.rt);
+        JS_SetDebugCallback(g_bridge.rt, nullptr, nullptr);
+    }
+    g_bridge.running = false;
+
+    /* Wait for threads */
+    if (g_bridge.handlerThread.joinable())
+        g_bridge.handlerThread.join();
     if (g_bridge.scriptThread.joinable())
         g_bridge.scriptThread.join();
 

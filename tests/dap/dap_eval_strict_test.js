@@ -36,6 +36,7 @@ async function runTest() {
         await client.sendRequest('initialize', { clientID: 'test', adapterID: 'noix', pathFormat: 'path' });
         const bpResp = await client.sendRequest('setBreakpoints', { source: { path: testScript }, breakpoints: [{ line: 6 }] });
         assert(bpResp.success, 'setBreakpoints succeeded');
+        await client.sendRequest('configurationDone');
         await client.sendRequest('launch', { script: testScript, stopOnEntry: false });
         const stopped = await client.waitForEvent('stopped');
         assert(stopped.body.reason === 'breakpoint', 'stopped at breakpoint');

@@ -34,6 +34,8 @@ async function runTest() {
         const excResp = await client.sendRequest('setExceptionBreakpoints', { filters: ['uncaught'] });
         assert(excResp.success, 'setExceptionBreakpoints succeeded');
 
+        await client.sendRequest('configurationDone');
+
         const launchResp = await client.sendRequest('launch', { script: scriptPath, stopOnEntry: false });
         assert(launchResp.success, 'launch succeeded');
 
@@ -50,7 +52,8 @@ async function runTest() {
         assert(scopesResp.success, 'scopes succeeded');
         assert(scopesResp.body.scopes.length > 0, 'has scopes');
 
-        const varRef = scopesResp.body.scopes[0].variablesReference;
+        const localScope = scopesResp.body.scopes.find(s => s.name === 'Local') || scopesResp.body.scopes[0];
+        const varRef = localScope.variablesReference;
         const varsResp = await client.sendRequest('variables', { variablesReference: varRef });
         assert(varsResp.success, 'variables succeeded');
         assert(varsResp.body.variables.length > 0, 'has variables');
@@ -61,10 +64,10 @@ async function runTest() {
         assert(evalLocal.success, 'evaluate a+b succeeded');
         console.log(`  a + b = ${evalLocal.body.result}`);
 
-        // Evaluate module-scope vars (x, y NOT in frame scope in module mode)
+        // Evaluate closure/module-scope vars (x, y from enclosing scope)
         const evalModule = await client.sendRequest('evaluate', { expression: 'x + y', frameId: topFrame.id, context: 'repl' });
-        assert(!evalModule.success, 'evaluate x+y fails (module scope, not frame local)');
-        console.log(`  x + y = ${evalModule.body.result} (expected: not defined)`);
+        assert(evalModule.success, 'evaluate x+y succeeds (closure vars accessible)');
+        console.log(`  x + y = ${evalModule.body.result}`);
 
         const contResp = await client.sendRequest('continue', { threadId: 1 });
         assert(contResp.success, 'continue succeeded');

@@ -1,0 +1,77 @@
+{
+  "name": "noix-debug",
+  "displayName": "Noix Debug",
+  "description": "Debug adapter for noix-engine — connect to dap-debug-bridge via TCP",
+  "version": "0.1.0",
+  "publisher": "noix",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onDebugResolve:noix"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "noix",
+        "label": "Noix Engine",
+        "configurationAttributes": {
+          "attach": {
+            "required": [
+              "port"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "default": "127.0.0.1",
+                "description": "Host address of the DAP debug bridge"
+              },
+              "port": {
+                "type": "number",
+                "description": "TCP port of the DAP debug bridge"
+              },
+              "localRoot": {
+                "type": "string",
+                "description": "Local source root path for remote debugging"
+              },
+              "remoteRoot": {
+                "type": "string",
+                "description": "Remote source root path for remote debugging"
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Noix: Attach to DAP Server",
+            "description": "Attach to a running dap-debug-bridge via TCP",
+            "body": {
+              "type": "noix",
+              "request": "attach",
+              "name": "Attach to Noix",
+              "host": "127.0.0.1",
+              "port": 4711
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/vscode": "^1.85.0",
+    "@vscode/debugadapter-testsupport": "^1.67.0",
+    "mocha": "^11.7.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}

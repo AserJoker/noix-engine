@@ -155,6 +155,9 @@ async function runTest() {
         });
         assert(exbp.success, 'setExceptionBreakpoints succeeded');
 
+        /* configurationDone */
+        await client.sendRequest('configurationDone');
+
         /* launch */
         const launch = await client.sendRequest('launch', {
             script: scriptPath, stopOnEntry: false
@@ -180,7 +183,8 @@ async function runTest() {
         assert(sc.body.scopes.length > 0, 'has scopes');
 
         /* variables */
-        const vr = sc.body.scopes[0].variablesReference;
+        const localScope = sc.body.scopes.find(s => s.name === 'Local') || sc.body.scopes[0];
+        const vr = localScope.variablesReference;
         const va = await client.sendRequest('variables', { variablesReference: vr });
         assert(va.success, 'variables succeeded');
         assert(va.body.variables.length > 0, 'has variables');
