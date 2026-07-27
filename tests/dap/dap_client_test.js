@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * dap_client_test.js — Full DAP protocol test for dap-test-bridge
+ * dap_client_test.js — Full DAP protocol test for dap-debug-bridge
  */
 const { spawn } = require('child_process');
 const path = require('path');
 const { DapClient } = require('./dap_client');
 
-const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-test-bridge');
+const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-debug-bridge');
 const scriptPath = path.join(__dirname, 'scripts', 'dap_test.js');
 
 let passed = 0, failed = 0;

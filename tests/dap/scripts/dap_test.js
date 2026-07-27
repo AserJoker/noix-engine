@@ -1,5 +1,5 @@
 // DAP test script — exercises all debug API features
-// Used by dap-test-bridge for verification
+// Used by dap-debug-bridge for verification
 
 var x = 10;
 var y = 20;

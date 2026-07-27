@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { DapClient } = require('./dap_client');
 
-const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-test-bridge');
+const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-debug-bridge');
 const scriptPath = path.join(__dirname, 'scripts', 'dap_eval_strict2_script.js');
 
 let passed = 0, failed = 0;

@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { DapClient } = require('./dap_client');
 
-const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-test-bridge');
+const bridgePath = process.argv[2] || path.join(__dirname, '..', '..', 'dist', 'dap-debug-bridge');
 
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { console.log(`  PASS: ${m}`); passed++; } else { console.log(`  FAIL: ${m}`); failed++; } }

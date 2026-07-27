@@ -70,52 +70,22 @@ set_target_properties(noix-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 
-# ---- CDP Debug Bridge ----
-add_executable(cdp-debug-bridge
-    src/debug/CdpMain.cpp
-    src/debug/Base64.cpp
-    src/debug/Sha1.cpp
-    src/debug/WebSocketServer.cpp
-    src/debug/JsDebugBridge.cpp
-    src/debug/CdpDispatcher.cpp
-    src/debug/CdpSession.cpp
-    # Also needs core sources for Logger
-    src/core/Logger.cpp
-    src/core/Sink.cpp
-)
-
-target_include_directories(cdp-debug-bridge PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
-)
-
-target_link_libraries(cdp-debug-bridge PRIVATE
-    SDL3::SDL3
-    SDL3_net::SDL3_net
-    qjs
-    cjson
-)
-
-set_target_properties(cdp-debug-bridge PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
-)
-
-# ---- DAP Test Bridge ----
-add_executable(dap-test-bridge
+# ---- DAP Debug Bridge ----
+add_executable(dap-debug-bridge
     src/debug/DapTestBridge.cpp
 )
 
-target_include_directories(dap-test-bridge PRIVATE
+target_include_directories(dap-debug-bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
 )
 
-target_link_libraries(dap-test-bridge PRIVATE
+target_link_libraries(dap-debug-bridge PRIVATE
     qjs
     cjson
 )
 
-set_target_properties(dap-test-bridge PROPERTIES
+set_target_properties(dap-debug-bridge PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 

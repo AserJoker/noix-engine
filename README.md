@@ -13,8 +13,7 @@ noix-engine
 │   └── Sink           Output targets — ConsoleSink (colored) and FileSink (plain)
 ├── debug/         Remote debug service
 │   ├── DebugServer    Session management and command dispatch (HTTP-based)
-│   ├── DapTestBridge  Standalone DAP debug bridge for QuickJS (stdio protocol)
-│   └── JsDebugBridge  Thread model, command queue, event queue (shared by CDP/DAP)
+│   └── DapBridge      DAP debug bridge for QuickJS (stdio protocol)
 ├── resource/      Resource management
 │   └── ResourcePack   Multi-pack resource resolver with priority overlay
 ├── runtime/       Application lifecycle
@@ -53,20 +52,20 @@ cmake --build build
 
 Build outputs go to `dist/`:
 - `dist/noix-engine` — main engine executable
-- `dist/dap-test-bridge` — DAP debug bridge (standalone)
+- `dist/dap-debug-bridge` — DAP debug bridge (standalone)
 
 ## DAP Debug Bridge
 
-The `dap-test-bridge` is a standalone executable that wraps QuickJS with the Debug Adapter Protocol. It communicates over stdio using DAP's Content-Length framing, making it compatible with VS Code and other DAP clients.
+The `dap-debug-bridge` is a standalone executable that wraps QuickJS with the Debug Adapter Protocol. It communicates over stdio using DAP's Content-Length framing, making it compatible with VS Code and other DAP clients.
 
 ### Quick Start
 
 ```bash
 # Build
-cmake --build build --target dap-test-bridge
+cmake --build build --target dap-debug-bridge
 
 # Run with a JS script
-dist/dap-test-bridge --script path/to/script.js
+dist/dap-debug-bridge --script path/to/script.js
 ```
 
 All scripts are evaluated as ES modules (`JS_EVAL_TYPE_MODULE`). Import statements are supported via a custom module loader that compiles imported modules with debug info so breakpoints work across files.
@@ -107,12 +106,11 @@ All scripts are evaluated as ES modules (`JS_EVAL_TYPE_MODULE`). Import statemen
 ```
 DAP Client (VS Code / test script)
        ↕ stdio (Content-Length + JSON)
-  DapTestBridge
-       ↕
-  JsDebugBridge (thread model)
+  DapBridge
     ├── command queue: main thread → script thread (via enqueueAndWait)
     ├── event queue:  script thread → main thread (via pushEvent)
-    └── drainQueue:   script thread calls during pause loop
+    ├── drainQueue:   script thread calls during pause loop
+    └── object expansion: variablesReference → JSValue map
        ↕
   QuickJS Debug API (JS_Debug*)
 ```
@@ -126,7 +124,7 @@ DAP Client (VS Code / test script)
 
 ### DAP Protocol Tests
 
-Node.js tests in `tests/dap/` exercise the full DAP protocol by spawning `dap-test-bridge` as a child process.
+Node.js tests in `tests/dap/` exercise the full DAP protocol by spawning `dap-debug-bridge` as a child process.
 
 ```bash
 # Run all DAP tests from project root
@@ -302,14 +300,14 @@ noix-engine/
 ├── CMakeLists.txt
 ├── include/
 │   ├── core/
-│   ├── debug/              Debug server + DAP bridge headers
+│   ├── debug/              Debug server + DAP bridge
 │   ├── resource/
 │   ├── runtime/
 │   └── script/
 ├── src/
 │   ├── main.cpp
 │   ├── core/
-│   ├── debug/              Debug server + DAP/CDP bridge implementations
+│   ├── debug/              Debug server + DAP bridge
 │   ├── resource/
 │   ├── runtime/
 │   └── script/
