@@ -66,9 +66,16 @@ void DapServer::stop() {
         JS_DebugContinue(_bridge.rt);
     }
 
-    /* Close the client socket to unblock the reader thread.
-       If handleDisconnect already closed it, this is a no-op (client is null). */
+    /* Close client socket to unblock the reader thread's tcp_read_byte */
     _bridge.closeTransport();
+
+    /* Close the server socket to unblock NET_AcceptClient in the reader thread.
+       Without this, the reader thread stays blocked waiting for a new client
+       and join() hangs. */
+    if (!_useStdio && _tcpCtx && _tcpCtx->server) {
+        NET_DestroyServer(_tcpCtx->server);
+        _tcpCtx->server = nullptr;
+    }
 
     /* Wake up any threads waiting on condition variables */
     _bridge.cmdCv.notify_one();
@@ -83,9 +90,10 @@ void DapServer::stop() {
     /* Resume the game loop in case it's frozen */
     _bridge.resumeGameLoop();
 
-    /* Cleanup TCP (client socket may already be closed by closeTransport) */
+    /* Final TCP cleanup (NET_Quit) */
     if (!_useStdio && _tcpCtx) {
-        cleanup_tcp(_tcpCtx.get());
+        /* Server socket already destroyed above; just clean up NET */
+        NET_Quit();
     }
 }
 

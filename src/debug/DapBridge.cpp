@@ -325,10 +325,9 @@ int tcp_read_byte(void *ctx) {
     auto *t = static_cast<TcpCtx *>(ctx);
     while (t->recvBuffer.empty()) {
         if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
-        /* Wait up to 500ms for data; timeout is NOT an error -- just retry.
-           This keeps the connection alive while the user is idle (e.g. between
-           clicking Step Over / Continue in VS Code). */
-        if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 500)) {
+        /* Wait up to 100ms for data; timeout is NOT an error -- just retry.
+           Short timeout ensures prompt detection of shutdown/client disconnect. */
+        if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 100)) {
             if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
             continue; /* Timeout -- no data yet, retry */
         }
@@ -489,6 +488,18 @@ void DapBridge::resetSession() {
     pendingBreakpoints.clear();
     clearObjectRefs();
     seq = 1;
+
+    /* Drain any leftover requests/commands from the previous session */
+    {
+        std::lock_guard<std::mutex> lk(reqMutex);
+        std::queue<std::string> empty;
+        reqQueue.swap(empty);
+    }
+    {
+        std::lock_guard<std::mutex> lk(cmdMutex);
+        std::queue<std::function<void()>> empty;
+        cmdQueue.swap(empty);
+    }
 }
 
 /* ---- DapBridge methods ---- */
