@@ -39,9 +39,9 @@ std::optional<bool> Config::getBool(const std::string& key) const {
 }
 
 Config Config::getObject(const std::string& key) const {
-    if (!_data.has(key)) return Config(Value::object());
+    if (!_data.has(key)) return Config(Value());
     const Value& v = _data[key];
-    return v.isObject() ? Config(v) : Config(Value::object());
+    return v.isObject() ? Config(v) : Config(Value());
 }
 
 // getter (default 版本)
@@ -107,7 +107,7 @@ std::string Config::toJson() const {
 }
 
 Config::operator bool() const {
-    return _data.isObject() && !_data.asObject().empty();
+    return _data.isObject();
 }
 
 } // namespace noix::core

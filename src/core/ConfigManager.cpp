@@ -54,7 +54,7 @@ bool ConfigManager::has(const NamespacedId& id) const {
 Config ConfigManager::get(const NamespacedId& id) const {
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
-    if (it == _entries.end()) return Config();
+    if (it == _entries.end()) return Config(Value());
     return it->second.config;
 }
 

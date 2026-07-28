@@ -22,6 +22,7 @@ add_executable(test_unit
     ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/core/NamespacedId.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sink.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Value.cpp
     ${CMAKE_SOURCE_DIR}/src/resource/ResourcePack.cpp
 )
 target_link_libraries(test_unit PRIVATE GTest::gtest_main SDL3::SDL3 cjson)
