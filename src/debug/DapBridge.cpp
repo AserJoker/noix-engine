@@ -796,15 +796,7 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
 
     /* In the new architecture, the script is already running (loaded by
        ScriptEngine at startup). The debugger just attaches to observe.
-       Do NOT call executeScript() here — it would re-evaluate the script.
-
-       Buffer a "stopped" event so VS Code shows the debug panel after
-       configurationDone. The user can then continue or set breakpoints. */
-    if (rt && ctx) {
-        pendingStop.reason = "entry";
-        pendingStop.threadId = 1;
-        pendingStop.valid = true;
-    }
+       Do NOT call executeScript() here — it would re-evaluate the script. */
 
     sendResponse(requestSeq, commandName, true, nullptr, nullptr);
 }
