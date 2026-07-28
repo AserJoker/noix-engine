@@ -1,5 +1,7 @@
 #pragma once
 
+#include "debug/DapBridge.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -8,9 +10,6 @@
 namespace noix::script { class ScriptEngine; }
 
 namespace noix::debug {
-
-class DapBridge;
-struct TcpCtx;
 
 class DapServer {
 public:
@@ -24,7 +23,7 @@ public:
     void stop();
 
     uint16_t port() const { return _port; }
-    DapBridge& bridge();
+    DapBridge& bridge() { return _bridge; }
 
 private:
     void readerThreadFunc();
@@ -32,6 +31,7 @@ private:
     uint16_t _port;
     bool _useStdio;
     script::ScriptEngine& _engine;
+    DapBridge _bridge;
     std::unique_ptr<TcpCtx> _tcpCtx;
     std::thread _readerThread;
 };

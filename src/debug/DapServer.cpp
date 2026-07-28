@@ -12,27 +12,23 @@ DapServer::DapServer(uint16_t port, script::ScriptEngine& engine, bool useStdio)
     : _port(port)
     , _useStdio(useStdio)
     , _engine(engine)
+    , _bridge()
     , _tcpCtx(std::make_unique<TcpCtx>())
 {
+    _bridge.setEngine(&engine);
 }
 
 DapServer::~DapServer() {
     stop();
 }
 
-DapBridge& DapServer::bridge() {
-    return *_engine.dapBridge();
-}
-
 void DapServer::start() {
-    auto& br = bridge();
-
     /* Initialize transport */
     if (_useStdio) {
-        init_stdio_transport(&br.transport);
+        init_stdio_transport(&_bridge.transport);
         core::Logger::instance().info("DapServer: stdio transport initialized");
     } else if (_port > 0) {
-        if (!init_tcp_transport(&br.transport, _tcpCtx.get(), _port, br.shuttingDown)) {
+        if (!init_tcp_transport(&_bridge.transport, _tcpCtx.get(), _port, _bridge.shuttingDown)) {
             core::Logger::instance().error("DapServer: failed to initialize TCP transport on port {}", _port);
             return;
         }
@@ -43,22 +39,34 @@ void DapServer::start() {
     }
 
     /* Start handler thread */
-    br.startHandlerThread();
+    _bridge.startHandlerThread();
 
     /* Start reader thread */
     _readerThread = std::thread(&DapServer::readerThreadFunc, this);
 }
 
 void DapServer::stop() {
-    auto& br = bridge();
-    br.shuttingDown = true;
-    br.reqCv.notify_one();
+    _bridge.shuttingDown = true;
+
+    /* If the script thread is paused in a debug callback, resume QuickJS so
+       it can exit the paused loop. Without this, drainQueue() blocks forever
+       on cmdCv and the script thread never checks _running. */
+    if (_bridge.rt) {
+        JS_DebugContinue(_bridge.rt);
+    }
+
+    /* Wake up any threads waiting on condition variables */
+    _bridge.cmdCv.notify_one();
+    _bridge.reqCv.notify_one();
 
     if (_readerThread.joinable()) {
         _readerThread.join();
     }
 
-    br.stopHandlerThread();
+    _bridge.stopHandlerThread();
+
+    /* Resume the game loop in case it's frozen */
+    _bridge.resumeGameLoop();
 
     /* Cleanup TCP */
     if (!_useStdio && _tcpCtx) {
@@ -67,15 +75,14 @@ void DapServer::stop() {
 }
 
 void DapServer::readerThreadFunc() {
-    auto& br = bridge();
     std::string message;
 
-    while (dap_read_message(br.transport, message)) {
+    while (dap_read_message(_bridge.transport, message)) {
         {
-            std::lock_guard<std::mutex> lk(br.reqMutex);
-            br.reqQueue.push(std::move(message));
+            std::lock_guard<std::mutex> lk(_bridge.reqMutex);
+            _bridge.reqQueue.push(std::move(message));
         }
-        br.reqCv.notify_one();
+        _bridge.reqCv.notify_one();
         message.clear();
     }
 

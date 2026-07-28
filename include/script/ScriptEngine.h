@@ -47,6 +47,9 @@ public:
     /// 设置调试冻结/恢复 SDL 事件类型
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
 
+    /// 检查脚本线程是否在运行（用于 interrupt handler）
+    bool isRunning() const { return _running.load(); }
+
     /// QuickJS runtime/context 访问（仅脚本线程）
     JSRuntime* runtime() const { return _rt; }
     JSContext* context() const { return _ctx; }

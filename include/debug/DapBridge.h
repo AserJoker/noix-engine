@@ -86,6 +86,9 @@ public:
     /* Shutdown flag (accessible from transport code) */
     std::atomic<bool> shuttingDown{false};
 
+    /* Resume the game loop (used by DapServer::stop to unfreeze on exit) */
+    void resumeGameLoop() { pushResumeEvent(); }
+
     /* QuickJS state — set by ScriptEngine after creating runtime */
     JSRuntime *rt = nullptr;
     JSContext *ctx = nullptr;

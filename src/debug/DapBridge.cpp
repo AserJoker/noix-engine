@@ -542,9 +542,10 @@ void DapBridge::enqueueAndWait(std::function<void()> fn) {
        on the script thread, which will pick up our command. */
     cmdCv.notify_one();
 
-    /* Wait for the script thread to execute the command. */
+    /* Wait for the script thread to execute the command.
+       Also break out if shutting down to avoid deadlock on exit. */
     std::unique_lock<std::mutex> wl(waitMutex);
-    waitCv.wait(wl, [&]() { return done; });
+    waitCv.wait(wl, [&]() { return done || shuttingDown.load(); });
 }
 
 /* drain: called on script thread while paused */
@@ -734,7 +735,12 @@ void DapBridge::handleInitialize(cJSON *args, int requestSeq) {
 
 void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandName) {
     const char *script = json_get_str(args, "script");
-    if (script && script[0]) scriptPath = normalizePath(script);
+    if (script && script[0]) {
+        scriptPath = normalizePath(script);
+    } else if (_engine) {
+        /* attach mode: default to scriptsPath/entry.js */
+        scriptPath = normalizePath((_engine->scriptsPath() + "/entry.js").c_str());
+    }
     stopOnEntry = json_get_bool(args, "stopOnEntry", false);
 
     if (scriptPath.empty()) {

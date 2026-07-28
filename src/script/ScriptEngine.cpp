@@ -7,6 +7,13 @@
 
 namespace noix::script {
 
+/* QuickJS interrupt handler: checks _running flag to allow forced termination
+   of scripts with infinite loops when the engine is shutting down. */
+static int jsInterruptHandler(JSRuntime *rt, void *opaque) {
+    auto *engine = static_cast<ScriptEngine *>(opaque);
+    return engine->isRunning() ? 0 : 1;
+}
+
 ScriptEngine::ScriptEngine(const std::string& basePath)
     : _scriptsPath(basePath + "/scripts") {}
 
@@ -75,6 +82,10 @@ void ScriptEngine::scriptThreadFunc() {
         core::Logger::instance().error("ScriptEngine: failed to create QuickJS runtime");
         return;
     }
+
+    /* Set interrupt handler so scripts with infinite loops can be terminated
+       when the engine shuts down (_running becomes false). */
+    JS_SetInterruptHandler(_rt, jsInterruptHandler, this);
 
     /* Wire up DAP bridge if present */
     if (_dapBridge) {
