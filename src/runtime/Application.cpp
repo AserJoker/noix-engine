@@ -16,6 +16,7 @@ namespace noix::runtime {
 
 Application* Application::_instance = nullptr;
 
+namespace {
 ResolutionSize getResolutionSize(Resolution res) {
     switch (res) {
     case Resolution::HD:  return {1280, 720};
@@ -57,6 +58,7 @@ const char* toString(Resolution res) {
     }
     return "fhd";
 }
+} // anonymous namespace
 
 Application::Application(int argc, char* argv[]) {
     _args.parse(argc, argv);

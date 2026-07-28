@@ -38,12 +38,6 @@ struct ResolutionSize {
     int height;
 };
 
-ResolutionSize getResolutionSize(Resolution res);
-const char* toString(WindowMode mode);
-WindowMode parseWindowMode(const std::string& str);
-Resolution parseResolution(const std::string& str);
-const char* toString(Resolution res);
-
 class Application {
 public:
     Application(int argc, char* argv[]);
