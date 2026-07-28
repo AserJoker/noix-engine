@@ -1,6 +1,7 @@
 #include "script/ScriptEngine.h"
 #include "debug/DapBridge.h"
 #include "core/Logger.h"
+#include "script/NativeModules.h"
 
 #include "quickjs.h"
 #include <SDL3/SDL.h>
@@ -99,6 +100,9 @@ void ScriptEngine::scriptThreadFunc() {
     }
 
     core::Logger::instance().info("ScriptEngine: QuickJS runtime initialized");
+
+    /* Register native modules (noix:logger, etc.) */
+    registerNativeModules(_ctx);
 
     /* Wait for DAP launch signal or process tasks */
     while (_running.load()) {
