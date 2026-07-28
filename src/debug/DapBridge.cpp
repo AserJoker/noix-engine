@@ -581,9 +581,13 @@ void DapBridge::enqueueAndWait(std::function<void()> fn) {
     cmdCv.notify_one();
 
     /* Wait for the script thread to execute the command.
-       Also break out if shutting down to avoid deadlock on exit. */
+       Use a timeout so we periodically check shuttingDown — this prevents
+       deadlock when stopHandlerThread() sets shuttingDown but can only
+       notify reqCv (not this local waitCv). */
     std::unique_lock<std::mutex> wl(waitMutex);
-    waitCv.wait(wl, [&]() { return done || shuttingDown.load(); });
+    while (!done && !shuttingDown.load()) {
+        waitCv.wait_for(wl, std::chrono::milliseconds(100));
+    }
 }
 
 /* drain: called on script thread while paused */
@@ -790,10 +794,9 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
     running = true;
     firstStop = true;
 
-    /* Post executeScript as a task on the script thread */
-    if (_engine) {
-        _engine->postTask([this]() { executeScript(); });
-    }
+    /* In the new architecture, the script is already running (loaded by
+       ScriptEngine at startup). The debugger just attaches to observe.
+       Do NOT call executeScript() here — it would re-evaluate the script. */
 
     sendResponse(requestSeq, commandName, true, nullptr, nullptr);
 }
