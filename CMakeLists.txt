@@ -33,23 +33,11 @@ add_executable(noix-engine
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
-    src/debug/BreakpointCommand.cpp
-    src/debug/ConfigGetCommand.cpp
-    src/debug/DebugControlCommand.cpp
-    src/debug/DebugEvalCommand.cpp
-    src/debug/DebugEvalFrameCommand.cpp
+    src/debug/DapBridge.cpp
+    src/debug/DapServer.cpp
     src/debug/DebugServer.cpp
-    src/debug/DebugStatusCommand.cpp
-    src/debug/EvalCommand.cpp
-    src/debug/HttpServer.cpp
-    src/debug/ShutdownCommand.cpp
-    src/debug/StackTraceCommand.cpp
-    src/debug/DebugVariablesCommand.cpp
-    src/debug/SourceMapCommand.cpp
-    src/debug/DebugRunCommand.cpp
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
-    src/script/DebugAgent.cpp
     src/script/NativeModules.cpp
     src/script/ScriptEngine.cpp
 )
@@ -57,6 +45,7 @@ add_executable(noix-engine
 target_include_directories(noix-engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/quickjs
 )
 
 target_link_libraries(noix-engine PRIVATE
@@ -70,7 +59,7 @@ set_target_properties(noix-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 
-# ---- DAP Debug Bridge ----
+# ---- DAP Debug Bridge (standalone test binary) ----
 add_executable(dap-debug-bridge
     src/debug/DapTestBridge.cpp
 )

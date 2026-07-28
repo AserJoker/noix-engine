@@ -8,9 +8,12 @@
 #include <string>
 #include <thread>
 
-namespace noix::script {
+struct JSRuntime;
+struct JSContext;
 
-class DebugAgent;
+namespace noix::debug { class DapBridge; }
+
+namespace noix::script {
 
 class ScriptEngine {
 public:
@@ -32,20 +35,21 @@ public:
     /// 排空任务队列（脚本线程调用，用于暂停循环中处理命令）
     void drainTaskQueue();
 
-    /// 获取 DebugAgent（仅脚本线程访问）
-    DebugAgent* debugAgent() const { return _debugAgent.get(); }
-
     /// 获取脚本目录路径
     const std::string& scriptsPath() const { return _scriptsPath; }
+
+    /// 设置 DAP bridge（在 start 前调用）
+    void setDapBridge(debug::DapBridge* bridge);
+
+    /// 获取 DAP bridge
+    debug::DapBridge* dapBridge() const { return _dapBridge; }
 
     /// 设置调试冻结/恢复 SDL 事件类型
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
 
-    /// 设置 debug-wait 模式：start() 后等待 debugRun() 才加载脚本
-    void setDebugWait(bool wait) { _debugWait = wait; }
-
-    /// 通知脚本线程可以开始加载脚本（配合 --debug-wait）
-    void debugRun();
+    /// QuickJS runtime/context 访问（仅脚本线程）
+    JSRuntime* runtime() const { return _rt; }
+    JSContext* context() const { return _ctx; }
 
 private:
     void scriptThreadFunc();
@@ -58,16 +62,16 @@ private:
     std::queue<std::function<void()>> _taskQueue;
     std::atomic<bool> _running{false};
 
-    // 仅脚本线程访问
-    std::unique_ptr<DebugAgent> _debugAgent;
+    /// QuickJS runtime（脚本线程所有）
+    JSRuntime* _rt = nullptr;
+    JSContext* _ctx = nullptr;
+
+    /// DAP bridge
+    debug::DapBridge* _dapBridge = nullptr;
 
     // 调试事件类型（在 start 前设置）
     uint32_t _freezeEventType{0};
     uint32_t _resumeEventType{0};
-
-    // debug-wait 模式
-    bool _debugWait{false};
-    std::atomic<bool> _debugRunSignaled{false};
 };
 
 } // namespace noix::script

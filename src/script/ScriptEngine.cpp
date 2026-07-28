@@ -1,6 +1,8 @@
 #include "script/ScriptEngine.h"
-#include "script/DebugAgent.h"
+#include "debug/DapBridge.h"
 #include "core/Logger.h"
+
+#include "quickjs.h"
 #include <SDL3/SDL.h>
 
 namespace noix::script {
@@ -22,7 +24,6 @@ void ScriptEngine::start() {
 void ScriptEngine::stop() {
     if (!_running.load()) return;
     _running.store(false);
-    _debugRunSignaled = true;
     {
         std::lock_guard lock(_queueMutex);
         _queueCv.notify_one();
@@ -56,52 +57,47 @@ void ScriptEngine::drainTaskQueue() {
     }
 }
 
+void ScriptEngine::setDapBridge(debug::DapBridge* bridge) {
+    _dapBridge = bridge;
+}
+
 void ScriptEngine::setDebugEventTypes(uint32_t freezeType, uint32_t resumeType) {
     _freezeEventType = freezeType;
     _resumeEventType = resumeType;
 }
 
-void ScriptEngine::debugRun() {
-    _debugRunSignaled = true;
-    _queueCv.notify_one();
-}
-
-// ---- 脚本线程主函数 ----
-
 void ScriptEngine::scriptThreadFunc() {
-    // TODO: 初始化 JS 引擎
+    /* Create QuickJS runtime and context */
+    _rt = JS_NewRuntime();
+    _ctx = JS_NewContext(_rt);
 
-    _debugAgent = std::make_unique<DebugAgent>(*this);
-    _debugAgent->setFreezeEventType(_freezeEventType);
-    _debugAgent->setResumeEventType(_resumeEventType);
-    // TODO: _debugAgent->install()
-
-    // debug-wait 模式
-    if (_debugWait) {
-        core::Logger::instance().info("Debug-wait: waiting for debug-run signal...");
-        while (_running.load() && !_debugRunSignaled) {
-            std::function<void()> task;
-            {
-                std::unique_lock lock(_queueMutex);
-                _queueCv.wait_for(lock, std::chrono::milliseconds(100),
-                    [this] { return !_taskQueue.empty() || !_running.load() || _debugRunSignaled; });
-                if (!_taskQueue.empty()) {
-                    task = std::move(_taskQueue.front());
-                    _taskQueue.pop();
-                }
-            }
-            if (task) {
-                task();
-            }
-        }
-        if (!_running.load()) { return; }
-        core::Logger::instance().info("Debug-wait: signal received, loading scripts");
+    if (!_rt || !_ctx) {
+        core::Logger::instance().error("ScriptEngine: failed to create QuickJS runtime");
+        return;
     }
 
-    // TODO: 加载入口文件
+    /* Wire up DAP bridge if present */
+    if (_dapBridge) {
+        _dapBridge->rt = _rt;
+        _dapBridge->ctx = _ctx;
 
-    // 事件循环
+        JS_SetDebugCallback(_rt, debug::DapBridge::debugCallback, _dapBridge);
+        JS_SetDebugDrainQueue(_rt, debug::DapBridge::drainQueue);
+
+        _dapBridge->setDebugEventTypes(_freezeEventType, _resumeEventType);
+    }
+
+    core::Logger::instance().info("ScriptEngine: QuickJS runtime initialized");
+
+    /* Wait for DAP launch signal or process tasks */
     while (_running.load()) {
+        /* Check if DAP launch was requested */
+        if (_dapBridge && _dapBridge->launchRequested.load()) {
+            _dapBridge->launchRequested = false;
+            _dapBridge->executeScript();
+            /* After script completes, continue task loop */
+        }
+
         std::function<void()> task;
         {
             std::unique_lock lock(_queueMutex);
@@ -117,9 +113,13 @@ void ScriptEngine::scriptThreadFunc() {
         }
     }
 
-    // 清理
-    _debugAgent.reset();
-    // TODO: 清理 JS 引擎
+    /* Cleanup QuickJS */
+    if (_dapBridge) {
+        _dapBridge->rt = nullptr;
+        _dapBridge->ctx = nullptr;
+    }
+    if (_ctx) { JS_FreeContext(_ctx); _ctx = nullptr; }
+    if (_rt) { JS_RunGC(_rt); JS_FreeRuntime(_rt); _rt = nullptr; }
 }
 
 } // namespace noix::script
