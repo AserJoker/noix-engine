@@ -324,14 +324,14 @@ void init_stdio_transport(DapTransport *t) {
 int tcp_read_byte(void *ctx) {
     auto *t = static_cast<TcpCtx *>(ctx);
     while (t->recvBuffer.empty()) {
-        if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
+        if (!t->client || (t->shuttingDown && t->shuttingDown->load()) || t->clientDisconnected.load()) return -1;
         /* Wait up to 100ms for data; timeout is NOT an error -- just retry.
            Short timeout ensures prompt detection of shutdown/client disconnect. */
         if (!NET_WaitUntilInputAvailable(reinterpret_cast<void **>(&t->client), 1, 100)) {
-            if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
+            if (!t->client || (t->shuttingDown && t->shuttingDown->load()) || t->clientDisconnected.load()) return -1;
             continue; /* Timeout -- no data yet, retry */
         }
-        if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
+        if (!t->client || (t->shuttingDown && t->shuttingDown->load()) || t->clientDisconnected.load()) return -1;
         char buf[4096];
         int n = NET_ReadFromStreamSocket(t->client, buf, sizeof(buf));
         if (n > 0) {
@@ -384,6 +384,7 @@ bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port,
 }
 
 bool tcp_accept_client(TcpCtx *tcp) {
+    tcp->clientDisconnected.store(false);
     while (!tcp->client && !(tcp->shuttingDown && tcp->shuttingDown->load())) {
         NET_AcceptClient(tcp->server, &tcp->client);
         if (!tcp->client) {
@@ -466,12 +467,15 @@ DapBridge::~DapBridge() {
 
 void DapBridge::closeTransport() {
     /* Close the client socket so the reader thread's blocking read unblocks.
-       The TcpCtx* in transport.ctx is owned by DapServer, so we only null
-       out the client pointer here; DapServer::stop() handles full cleanup. */
+       Also set clientDisconnected flag so tcp_read_byte exits promptly
+       even if closesocket() doesn't wake up poll() on Windows. */
     auto *tcp = static_cast<TcpCtx*>(transport.ctx);
-    if (tcp && tcp->client) {
-        NET_DestroyStreamSocket(tcp->client);
-        tcp->client = nullptr;
+    if (tcp) {
+        tcp->clientDisconnected.store(true);
+        if (tcp->client) {
+            NET_DestroyStreamSocket(tcp->client);
+            tcp->client = nullptr;
+        }
     }
 }
 

@@ -57,6 +57,7 @@ void DapServer::start() {
 }
 
 void DapServer::stop() {
+    core::Logger::instance().info("DapServer::stop: begin");
     _bridge.shuttingDown = true;
 
     /* If the script thread is paused in a debug callback, resume QuickJS so
@@ -81,11 +82,15 @@ void DapServer::stop() {
     _bridge.cmdCv.notify_one();
     _bridge.reqCv.notify_one();
 
+    core::Logger::instance().info("DapServer::stop: joining reader thread...");
     if (_readerThread.joinable()) {
         _readerThread.join();
     }
+    core::Logger::instance().info("DapServer::stop: reader thread joined");
 
+    core::Logger::instance().info("DapServer::stop: stopping handler thread...");
     _bridge.stopHandlerThread();
+    core::Logger::instance().info("DapServer::stop: handler thread stopped");
 
     /* Resume the game loop in case it's frozen */
     _bridge.resumeGameLoop();
@@ -95,6 +100,7 @@ void DapServer::stop() {
         /* Server socket already destroyed above; just clean up NET */
         NET_Quit();
     }
+    core::Logger::instance().info("DapServer::stop: done");
 }
 
 void DapServer::readerThreadFunc() {

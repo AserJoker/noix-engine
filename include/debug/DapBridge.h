@@ -54,6 +54,7 @@ struct TcpCtx {
     std::string recvBuffer;
     int port = 0;
     std::atomic<bool> *shuttingDown = nullptr; /* pointer to DapBridge::shuttingDown */
+    std::atomic<bool> clientDisconnected{false}; /* set when client socket is closed */
 };
 
 /* ---- Scope varRef encoding ---- */
