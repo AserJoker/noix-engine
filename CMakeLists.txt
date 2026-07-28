@@ -34,7 +34,12 @@ add_executable(noix-engine
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
     src/core/Value.cpp
-    src/debug/DapBridge.cpp
+    src/debug/DapBridgeCore.cpp
+    src/debug/DapBridgeHandlers.cpp
+    src/debug/DapBridgeExecute.cpp
+    src/debug/DapObjectRefStore.cpp
+    src/debug/DapTransport.cpp
+    src/debug/DapBridgeUtils.cpp
     src/debug/DapServer.cpp
     src/debug/HttpServer.cpp
     src/resource/ResourcePack.cpp

@@ -17,6 +17,7 @@
  *   Script thread  — owned by ScriptEngine, executes JS + debug callbacks
  */
 
+#include "debug/DapObjectRefStore.h"
 #include "quickjs.h"
 
 #include <SDL3_net/SDL_net.h>
@@ -195,16 +196,9 @@ public:
 
     /* ---- Object expansion (variablesReference for JS objects) ---- */
 
-    struct ObjectRef {
-        int varRef;         /* the variablesReference that refers to this object */
-        JSValue obj;        /* the JS object value */
-    };
-    std::vector<ObjectRef> objectRefs;
-    int nextObjectVarRef = 100000; /* start high to avoid collision with scope refs */
+    ObjectRefStore _objectRefs;
 
-    int addObjectRef(JSValue obj);
-    JSValue findObjectRef(int varRef);
-    void clearObjectRefs();
+    ObjectRefStore &objectRefs() { return _objectRefs; }
 
     /* Execute the script on the calling (script) thread.
        Called via ScriptEngine::postTask from handleLaunch.
@@ -223,24 +217,5 @@ private:
 };
 
 /* ---- Transport initialization functions ---- */
-
-void init_stdio_transport(DapTransport *t);
-bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port,
-                         std::atomic<bool> &shuttingDown);
-
-/* Wait for a client to connect on an existing server socket.
-   Returns true on success, false if shuttingDown. */
-bool tcp_accept_client(TcpCtx *tcp);
-
-/* TCP transport callbacks (used by DapServer for reconnection) */
-int tcp_read_byte(void *ctx);
-void tcp_write_message(void *ctx, const std::string &msg);
-void cleanup_tcp(TcpCtx *tcp);
-
-/* ---- DAP wire protocol ---- */
-
-bool dap_read_message(DapTransport &transport, std::string &out);
-void dap_write_message(DapTransport &transport, std::mutex &writeMutex,
-                        const std::string &json);
 
 } // namespace noix::debug

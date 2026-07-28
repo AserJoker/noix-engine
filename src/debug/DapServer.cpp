@@ -1,5 +1,6 @@
 #include "debug/DapServer.h"
 #include "debug/DapBridge.h"
+#include "DapBridgeUtils.h"
 #include "script/ScriptEngine.h"
 #include "core/Logger.h"
 
