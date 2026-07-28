@@ -123,7 +123,10 @@ void DapServer::readerThreadFunc() {
     while (!_bridge.shuttingDown.load()) {
         /* Wait for a client connection */
         core::Logger::instance().info("DapServer: waiting for client on port {}...", _port);
-        if (!tcp_accept_client(_tcpCtx.get())) break;
+        if (!tcp_accept_client(_tcpCtx.get())) {
+            core::Logger::instance().info("DapServer: accept aborted (shutting down)");
+            break;
+        }
 
         core::Logger::instance().info("DapServer: client connected on port {}", _port);
 

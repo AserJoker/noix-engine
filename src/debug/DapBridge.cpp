@@ -800,7 +800,15 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
 
     /* In the new architecture, the script is already running (loaded by
        ScriptEngine at startup). The debugger just attaches to observe.
-       Do NOT call executeScript() here — it would re-evaluate the script. */
+       Do NOT call executeScript() here — it would re-evaluate the script.
+
+       Buffer a "stopped" event so VS Code shows the debug panel after
+       configurationDone. The user can then continue or set breakpoints. */
+    if (rt && ctx) {
+        pendingStop.reason = "entry";
+        pendingStop.threadId = 1;
+        pendingStop.valid = true;
+    }
 
     sendResponse(requestSeq, commandName, true, nullptr, nullptr);
 }
@@ -814,18 +822,21 @@ void DapBridge::handleDisconnect(int requestSeq) {
         JS_DebugContinue(rt);
     }
 
-    /* Send response before closing the socket -- client expects immediate ack */
+    /* Send response and terminated event before closing the socket.
+       All writes are protected by writeMutex to avoid racing with closeTransport. */
     sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
-
-    /* Send terminated event so client knows the session is over */
     pushEvent("terminated", cJSON_CreateObject());
 
-    /* Close the client socket to unblock the reader thread's
-       NET_WaitUntilInputAvailable / NET_ReadFromStreamSocket.
-       The reader thread will then loop back to accept a new connection. */
-    closeTransport();
+    /* Close the client socket under writeMutex to ensure no concurrent writes.
+       Also sets clientDisconnected so tcp_read_byte exits promptly. */
+    {
+        std::lock_guard<std::mutex> lk(writeMutex);
+        closeTransport();
+    }
 
-    /* Push resume event so game loop un-freezes */
+    /* Push resume event so game loop un-freezes.
+       Socket is now closed; pushResumeEvent's write will be a no-op (client is null),
+       but the game loop unfreezing is handled by SDL events, not DAP writes. */
     pushResumeEvent();
 }
 
