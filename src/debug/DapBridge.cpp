@@ -563,26 +563,22 @@ void DapBridge::sendResponse(int requestSeq, const char *command, bool success,
 }
 
 void DapBridge::enqueueAndWait(std::function<void()> fn) {
+    if (!_engine) return;
+
     std::mutex waitMutex;
     std::condition_variable waitCv;
     bool done = false;
 
-    {
-        std::lock_guard<std::mutex> lk(cmdMutex);
-        cmdQueue.push([&]() {
-            fn();
-            {
-                std::lock_guard<std::mutex> wl(waitMutex);
-                done = true;
-            }
-            waitCv.notify_one();
-        });
-    }
-
-    /* Wake the script thread's drainQueue if it's paused.
-       This works because drainQueue is called in the paused loop
-       on the script thread, which will pick up our command. */
-    cmdCv.notify_one();
+    /* Post the command to the script thread via postTask.
+       The script thread's job loop will execute it. */
+    _engine->postTask([&]() {
+        fn();
+        {
+            std::lock_guard<std::mutex> wl(waitMutex);
+            done = true;
+        }
+        waitCv.notify_one();
+    });
 
     /* Wait for the script thread to execute the command.
        Use a timeout so we periodically check shuttingDown — this prevents
