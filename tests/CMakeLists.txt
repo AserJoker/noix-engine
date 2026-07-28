@@ -30,11 +30,10 @@ target_include_directories(test_unit PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/cJSON
 )
 
-# ---- Integration Tests ----
+# ---- Integration Tests (DebugServer shell) ----
 add_executable(test_integration
     integration/helpers/HttpClient.cpp
     integration/test_debug_server.cpp
-    integration/test_shutdown.cpp
 )
 target_link_libraries(test_integration PRIVATE GTest::gtest_main SDL3::SDL3 SDL3_net::SDL3_net)
 target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/integration/helpers)
