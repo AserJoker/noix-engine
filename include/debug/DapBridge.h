@@ -89,8 +89,11 @@ public:
     /* Resume the game loop (used by DapServer::stop to unfreeze on exit) */
     void resumeGameLoop() { pushResumeEvent(); }
 
-    /* Close transport (unblocks the reader thread) */
+    /* Close client socket to unblock the reader thread */
     void closeTransport();
+
+    /* Reset session state for a new client connection (keeps server socket alive) */
+    void resetSession();
 
     /* QuickJS state — set by ScriptEngine after creating runtime */
     JSRuntime *rt = nullptr;
@@ -223,6 +226,14 @@ private:
 void init_stdio_transport(DapTransport *t);
 bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port,
                          std::atomic<bool> &shuttingDown);
+
+/* Wait for a client to connect on an existing server socket.
+   Returns true on success, false if shuttingDown. */
+bool tcp_accept_client(TcpCtx *tcp);
+
+/* TCP transport callbacks (used by DapServer for reconnection) */
+int tcp_read_byte(void *ctx);
+void tcp_write_message(void *ctx, const std::string &msg);
 void cleanup_tcp(TcpCtx *tcp);
 
 /* ---- DAP wire protocol ---- */

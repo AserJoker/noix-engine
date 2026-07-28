@@ -321,7 +321,7 @@ void init_stdio_transport(DapTransport *t) {
 
 /* ---- TCP transport ---- */
 
-static int tcp_read_byte(void *ctx) {
+int tcp_read_byte(void *ctx) {
     auto *t = static_cast<TcpCtx *>(ctx);
     while (t->recvBuffer.empty()) {
         if (!t->client || (t->shuttingDown && t->shuttingDown->load())) return -1;
@@ -347,7 +347,7 @@ static int tcp_read_byte(void *ctx) {
     return c;
 }
 
-static void tcp_write_message(void *ctx, const std::string &msg) {
+void tcp_write_message(void *ctx, const std::string &msg) {
     auto *t = static_cast<TcpCtx *>(ctx);
     if (!t->client) return;
     NET_WriteToStreamSocket(t->client, msg.data(), static_cast<int>(msg.size()));
@@ -376,21 +376,22 @@ bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port,
 
     core::Logger::instance().info("DAP bridge listening on port {}, waiting for connection...", port);
 
-    /* Wait for a single client connection (DAP is 1:1) */
-    while (!tcp->client) {
-        NET_AcceptClient(tcp->server, &tcp->client);
-        if (!tcp->client) {
-            SDL_Delay(50);
-        }
-        if (shuttingDown.load()) return false;
-    }
-
-    core::Logger::instance().info("Client connected on port {}", port);
+    if (!tcp_accept_client(tcp)) return false;
 
     t->readByte = tcp_read_byte;
     t->writeMessage = tcp_write_message;
     t->ctx = tcp;
     return true;
+}
+
+bool tcp_accept_client(TcpCtx *tcp) {
+    while (!tcp->client && !(tcp->shuttingDown && tcp->shuttingDown->load())) {
+        NET_AcceptClient(tcp->server, &tcp->client);
+        if (!tcp->client) {
+            SDL_Delay(50);
+        }
+    }
+    return tcp->client != nullptr;
 }
 
 void cleanup_tcp(TcpCtx *tcp) {
@@ -473,6 +474,21 @@ void DapBridge::closeTransport() {
         NET_DestroyStreamSocket(tcp->client);
         tcp->client = nullptr;
     }
+}
+
+void DapBridge::resetSession() {
+    /* Reset per-session state so a new client can connect fresh.
+       Does NOT close the server socket — that's managed by DapServer. */
+    initialized = false;
+    launched = false;
+    running = false;
+    configDone = false;
+    stopOnEntry = false;
+    firstStop = true;
+    pendingStop = {};
+    pendingBreakpoints.clear();
+    clearObjectRefs();
+    seq = 1;
 }
 
 /* ---- DapBridge methods ---- */
@@ -775,11 +791,9 @@ void DapBridge::handleDisconnect(int requestSeq) {
     core::Logger::instance().debug("[DAP] handleDisconnect: enter, running={}, rt={}",
                                     running.load(), (void*)rt);
     running = false;
-    shuttingDown = true;
 
     if (rt) {
         JS_DebugContinue(rt);
-        JS_SetDebugCallback(rt, nullptr, nullptr);
     }
 
     /* Send response before closing the socket -- client expects immediate ack */
@@ -790,8 +804,7 @@ void DapBridge::handleDisconnect(int requestSeq) {
 
     /* Close the client socket to unblock the reader thread's
        NET_WaitUntilInputAvailable / NET_ReadFromStreamSocket.
-       Without this, the reader thread stays blocked on the socket
-       and DapServer::stop() hangs on join(). */
+       The reader thread will then loop back to accept a new connection. */
     closeTransport();
 
     /* Push resume event so game loop un-freezes */

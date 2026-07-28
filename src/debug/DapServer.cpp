@@ -23,26 +23,37 @@ DapServer::~DapServer() {
 }
 
 void DapServer::start() {
-    /* Initialize transport */
     if (_useStdio) {
+        /* stdio mode: single connection, no reconnection support */
         init_stdio_transport(&_bridge.transport);
         core::Logger::instance().info("DapServer: stdio transport initialized");
+        _bridge.startHandlerThread();
+        _readerThread = std::thread(&DapServer::readerThreadFunc, this);
     } else if (_port > 0) {
-        if (!init_tcp_transport(&_bridge.transport, _tcpCtx.get(), _port, _bridge.shuttingDown)) {
-            core::Logger::instance().error("DapServer: failed to initialize TCP transport on port {}", _port);
+        /* TCP mode: create server socket, accept connections in a loop */
+        if (!NET_Init()) {
+            core::Logger::instance().error("NET_Init failed: {}", SDL_GetError());
             return;
         }
-        core::Logger::instance().info("DapServer: TCP transport initialized on port {}", _port);
+        _tcpCtx->server = NET_CreateServer(nullptr, _port, 0);
+        if (!_tcpCtx->server) {
+            core::Logger::instance().error("NET_CreateServer failed: {}", SDL_GetError());
+            NET_Quit();
+            return;
+        }
+        _tcpCtx->shuttingDown = &_bridge.shuttingDown;
+        _tcpCtx->recvBuffer.clear();
+
+        core::Logger::instance().info("DapServer: listening on port {}", _port);
+
+        /* Start handler thread */
+        _bridge.startHandlerThread();
+
+        /* Start reader thread (handles accept + read loop) */
+        _readerThread = std::thread(&DapServer::readerThreadFunc, this);
     } else {
         core::Logger::instance().warn("DapServer: no transport configured (no --dap-port or --dap-stdio)");
-        return;
     }
-
-    /* Start handler thread */
-    _bridge.startHandlerThread();
-
-    /* Start reader thread */
-    _readerThread = std::thread(&DapServer::readerThreadFunc, this);
 }
 
 void DapServer::stop() {
@@ -79,18 +90,56 @@ void DapServer::stop() {
 }
 
 void DapServer::readerThreadFunc() {
-    std::string message;
-
-    while (dap_read_message(_bridge.transport, message)) {
-        {
-            std::lock_guard<std::mutex> lk(_bridge.reqMutex);
-            _bridge.reqQueue.push(std::move(message));
+    if (_useStdio) {
+        /* stdio: single connection, exit when client disconnects */
+        std::string message;
+        while (dap_read_message(_bridge.transport, message)) {
+            {
+                std::lock_guard<std::mutex> lk(_bridge.reqMutex);
+                _bridge.reqQueue.push(std::move(message));
+            }
+            _bridge.reqCv.notify_one();
+            message.clear();
         }
-        _bridge.reqCv.notify_one();
-        message.clear();
+        core::Logger::instance().info("DapServer: reader thread exited (stdio)");
+        return;
     }
 
-    core::Logger::instance().info("DapServer: reader thread exited");
+    /* TCP: accept connections in a loop, supporting reconnection */
+    while (!_bridge.shuttingDown.load()) {
+        /* Wait for a client connection */
+        core::Logger::instance().info("DapServer: waiting for client on port {}...", _port);
+        if (!tcp_accept_client(_tcpCtx.get())) break;
+
+        core::Logger::instance().info("DapServer: client connected on port {}", _port);
+
+        /* Reset session state for the new connection */
+        _bridge.resetSession();
+
+        /* Set up transport callbacks for this client */
+        _bridge.transport.readByte = tcp_read_byte;
+        _bridge.transport.writeMessage = tcp_write_message;
+        _bridge.transport.ctx = _tcpCtx.get();
+
+        /* Read messages until client disconnects */
+        std::string message;
+        while (dap_read_message(_bridge.transport, message)) {
+            {
+                std::lock_guard<std::mutex> lk(_bridge.reqMutex);
+                _bridge.reqQueue.push(std::move(message));
+            }
+            _bridge.reqCv.notify_one();
+            message.clear();
+        }
+
+        core::Logger::instance().info("DapServer: client disconnected");
+
+        /* Close client socket and prepare for next connection */
+        _bridge.closeTransport();
+        _tcpCtx->recvBuffer.clear();
+    }
+
+    core::Logger::instance().info("DapServer: reader thread exited (TCP)");
 }
 
 } // namespace noix::debug
