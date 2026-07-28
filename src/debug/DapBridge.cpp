@@ -771,6 +771,9 @@ void DapBridge::handleDisconnect(int requestSeq) {
         JS_SetDebugCallback(rt, nullptr, nullptr);
     }
 
+    /* Send terminated event so client knows the session is over */
+    pushEvent("terminated", cJSON_CreateObject());
+
     /* Send response before waiting -- client expects immediate ack */
     sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
     core::Logger::instance().debug("[DAP] handleDisconnect: response sent");
@@ -1637,19 +1640,14 @@ void DapBridge::executeScript() {
 
     JS_FreeValue(ctx, result);
 
-    /* Script finished */
-    pushEvent("terminated", cJSON_CreateObject());
+    /* Script finished — but do NOT send "terminated" here.
+       The script thread is persistent (job loop), and the main program may
+       invoke script callbacks at any time. The DAP session stays alive until
+       the client disconnects or the engine shuts down. */
     running = false;
 
     /* Push resume event so game loop un-freezes after script ends */
     pushResumeEvent();
-
-    /* Clear breakpoints and object refs.
-       Note: runtime/context cleanup is handled by ScriptEngine, not here. */
-    if (rt) {
-        JS_DebugClearBreakpoints(rt);
-    }
-    clearObjectRefs();
 }
 
 } // namespace noix::debug
