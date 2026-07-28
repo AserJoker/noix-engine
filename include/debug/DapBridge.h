@@ -89,6 +89,9 @@ public:
     /* Resume the game loop (used by DapServer::stop to unfreeze on exit) */
     void resumeGameLoop() { pushResumeEvent(); }
 
+    /* Close transport (unblocks the reader thread) */
+    void closeTransport();
+
     /* QuickJS state — set by ScriptEngine after creating runtime */
     JSRuntime *rt = nullptr;
     JSContext *ctx = nullptr;

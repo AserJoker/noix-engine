@@ -464,6 +464,17 @@ DapBridge::~DapBridge() {
     clearObjectRefs();
 }
 
+void DapBridge::closeTransport() {
+    /* Close the client socket so the reader thread's blocking read unblocks.
+       The TcpCtx* in transport.ctx is owned by DapServer, so we only null
+       out the client pointer here; DapServer::stop() handles full cleanup. */
+    auto *tcp = static_cast<TcpCtx*>(transport.ctx);
+    if (tcp && tcp->client) {
+        NET_DestroyStreamSocket(tcp->client);
+        tcp->client = nullptr;
+    }
+}
+
 /* ---- DapBridge methods ---- */
 
 void DapBridge::setDebugEventTypes(uint32_t freezeType, uint32_t resumeType) {
@@ -771,12 +782,17 @@ void DapBridge::handleDisconnect(int requestSeq) {
         JS_SetDebugCallback(rt, nullptr, nullptr);
     }
 
+    /* Send response before closing the socket -- client expects immediate ack */
+    sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
+
     /* Send terminated event so client knows the session is over */
     pushEvent("terminated", cJSON_CreateObject());
 
-    /* Send response before waiting -- client expects immediate ack */
-    sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
-    core::Logger::instance().debug("[DAP] handleDisconnect: response sent");
+    /* Close the client socket to unblock the reader thread's
+       NET_WaitUntilInputAvailable / NET_ReadFromStreamSocket.
+       Without this, the reader thread stays blocked on the socket
+       and DapServer::stop() hangs on join(). */
+    closeTransport();
 
     /* Push resume event so game loop un-freezes */
     pushResumeEvent();
