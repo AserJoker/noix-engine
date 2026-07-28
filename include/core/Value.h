@@ -65,8 +65,14 @@ public:
     const std::map<std::string, Value>& asObject() const {
         return std::get<std::map<std::string, Value>>(_data);
     }
+    std::map<std::string, Value>& asObject() {
+        return std::get<std::map<std::string, Value>>(_data);
+    }
 
     const std::vector<Value>& asArray() const {
+        return std::get<std::vector<Value>>(_data);
+    }
+    std::vector<Value>& asArray() {
         return std::get<std::vector<Value>>(_data);
     }
 

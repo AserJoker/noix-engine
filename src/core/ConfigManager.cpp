@@ -1,6 +1,5 @@
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
-#include <cJSON.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -55,7 +54,7 @@ bool ConfigManager::has(const NamespacedId& id) const {
 Config ConfigManager::get(const NamespacedId& id) const {
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
-    if (it == _entries.end()) return Config(static_cast<cJSON*>(nullptr));
+    if (it == _entries.end()) return Config();
     return it->second.config;
 }
 
@@ -103,9 +102,9 @@ void ConfigManager::set(const NamespacedId& id, Config cfg) {
 }
 
 Config ConfigManager::fromJson(const std::string& json) {
-    cJSON* root = cJSON_Parse(json.c_str());
-    if (!root) root = cJSON_CreateObject();
-    return Config(root);
+    Value data = Value::parse(json);
+    if (data.isNull()) data = Value::object();
+    return Config(std::move(data));
 }
 
 // --- 删除 ---
@@ -145,21 +144,19 @@ bool ConfigManager::load(const NamespacedId& id) {
     buf << file.rdbuf();
     std::string content = buf.str();
 
-    cJSON* root = cJSON_Parse(content.c_str());
-    if (!root) {
-        const char* errPtr = cJSON_GetErrorPtr();
-        Logger::instance().error("Failed to parse config file {}: error at {}",
-            path.string(), errPtr ? errPtr : "unknown");
+    Value data = Value::parse(content);
+    if (data.isNull()) {
+        Logger::instance().error("Failed to parse config file {}", path.string());
         return false;
     }
 
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
     if (it != _entries.end()) {
-        it->second.config = Config(root);
+        it->second.config = Config(std::move(data));
         it->second.dirty = false;
     } else {
-        _entries.emplace(id, Entry{Config(root), false});
+        _entries.emplace(id, Entry{Config(std::move(data)), false});
     }
 
     Logger::instance().info("Loaded config: {}:{}", id.ns(), id.name());

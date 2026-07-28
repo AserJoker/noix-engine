@@ -1,10 +1,9 @@
 #pragma once
 
+#include "core/Value.h"
 #include <cstdint>
 #include <optional>
 #include <string>
-
-struct cJSON;
 
 namespace noix::core {
 
@@ -13,12 +12,12 @@ class ConfigManager;
 class Config {
 public:
     Config();
-    ~Config();
+    ~Config() = default;
 
-    Config(Config&& other) noexcept;
-    Config& operator=(Config&& other) noexcept;
-    Config(const Config& other);
-    Config& operator=(const Config& other);
+    Config(Config&& other) noexcept = default;
+    Config& operator=(Config&& other) noexcept = default;
+    Config(const Config& other) = default;
+    Config& operator=(const Config& other) = default;
 
     // --- 查询 ---
     bool has(const std::string& key) const;
@@ -54,10 +53,9 @@ public:
     explicit operator bool() const;
 
 private:
-    explicit Config(cJSON* root);
-    cJSON* root() const;
+    explicit Config(Value data);
 
-    cJSON* _root = nullptr;
+    Value _data{Value::object()};
     friend class ConfigManager;
 };
 
