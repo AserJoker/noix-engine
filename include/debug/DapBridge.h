@@ -199,12 +199,8 @@ public:
     JSValue findObjectRef(int varRef);
     void clearObjectRefs();
 
-    /* Launch signal: ScriptEngine's thread checks launchRequested(),
-       then calls executeScript() to do the QuickJS eval. */
-    std::atomic<bool> launchRequested{false};
-
     /* Execute the script on the calling (script) thread.
-       Called by ScriptEngine after receiving the launch signal.
+       Called via ScriptEngine::postTask from handleLaunch.
        Does: read file, apply pending breakpoints, eval, run pending jobs,
        send terminated event. */
     void executeScript();

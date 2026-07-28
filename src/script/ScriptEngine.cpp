@@ -5,6 +5,7 @@
 
 #include "quickjs.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 
 namespace noix::script {
 
@@ -15,8 +16,50 @@ static int jsInterruptHandler(JSRuntime *rt, void *opaque) {
     return engine->isRunning() ? 0 : 1;
 }
 
+/* Module loader: reads JS source files for import statements.
+   Only handles file-based modules; noix: modules are C-native and resolved before this. */
+static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* opaque) {
+    auto* engine = static_cast<ScriptEngine*>(opaque);
+    std::string path(module_name);
+
+    /* Relative imports: resolve against scriptsPath */
+    if (path.starts_with("./") || path.starts_with("../")) {
+        path = engine->scriptsPath() + "/" + path;
+    }
+
+    /* Read file */
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
+        return nullptr;
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::string buf(len, '\0');
+    fread(buf.data(), 1, len, f);
+    fclose(f);
+
+    /* Compile and instantiate the module */
+    JSValue func = JS_Eval(ctx, buf.c_str(), buf.size(), module_name,
+                           JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (JS_IsException(func)) {
+        return nullptr;
+    }
+
+    JSModuleDef* m = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(func));
+    return m;
+}
+
 ScriptEngine::ScriptEngine(const std::string& basePath)
-    : _scriptsPath(basePath + "/scripts") {}
+    : _scriptsPath(basePath) {
+    /* Normalize path separators to '/' and ensure no trailing slash */
+    std::replace(_scriptsPath.begin(), _scriptsPath.end(), '\\', '/');
+    if (!_scriptsPath.empty() && _scriptsPath.back() == '/') {
+        _scriptsPath.pop_back();
+    }
+    _scriptsPath += "/scripts";
+}
 
 ScriptEngine::~ScriptEngine() {
     stop();
@@ -104,20 +147,21 @@ void ScriptEngine::scriptThreadFunc() {
     /* Register native modules (noix:logger, etc.) */
     registerNativeModules(_ctx);
 
-    /* Wait for DAP launch signal or process tasks */
-    while (_running.load()) {
-        /* Check if DAP launch was requested */
-        if (_dapBridge && _dapBridge->launchRequested.load()) {
-            _dapBridge->launchRequested = false;
-            _dapBridge->executeScript();
-            /* After script completes, continue task loop */
-        }
+    /* Set up module loader for file-based JS imports */
+    JS_SetModuleLoaderFunc(_rt, nullptr, moduleLoader, this);
 
+    /* Load entry script */
+    std::string entryPath = _scriptsPath + "/entry.js";
+    if (!loadScript(entryPath)) {
+        core::Logger::instance().warn("ScriptEngine: entry script not found: {}", entryPath);
+    }
+
+    /* Job loop: keep thread alive, process tasks on demand */
+    while (_running.load()) {
         std::function<void()> task;
         {
             std::unique_lock lock(_queueMutex);
-            _queueCv.wait_for(lock, std::chrono::milliseconds(100),
-                [this] { return !_taskQueue.empty() || !_running.load(); });
+            _queueCv.wait(lock, [this] { return !_taskQueue.empty() || !_running.load(); });
             if (!_taskQueue.empty()) {
                 task = std::move(_taskQueue.front());
                 _taskQueue.pop();
@@ -135,6 +179,33 @@ void ScriptEngine::scriptThreadFunc() {
     }
     if (_ctx) { JS_FreeContext(_ctx); _ctx = nullptr; }
     if (_rt) { JS_RunGC(_rt); JS_FreeRuntime(_rt); _rt = nullptr; }
+}
+
+bool ScriptEngine::loadScript(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::string buf(len, '\0');
+    fread(buf.data(), 1, len, f);
+    fclose(f);
+
+    JSValue result = JS_Eval(_ctx, buf.c_str(), buf.size(), path.c_str(),
+                              JS_EVAL_TYPE_MODULE);
+    if (JS_IsException(result)) {
+        JSValue exc = JS_GetException(_ctx);
+        const char* msg = JS_ToCString(_ctx, exc);
+        core::Logger::instance().error("ScriptEngine: error loading '{}': {}",
+                                        path, msg ? msg : "unknown");
+        JS_FreeCString(_ctx, msg);
+        JS_FreeValue(_ctx, exc);
+        return false;
+    }
+    JS_FreeValue(_ctx, result);
+    core::Logger::instance().info("ScriptEngine: loaded '{}'", path);
+    return true;
 }
 
 } // namespace noix::script

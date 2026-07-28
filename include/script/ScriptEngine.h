@@ -56,6 +56,7 @@ public:
 
 private:
     void scriptThreadFunc();
+    bool loadScript(const std::string& path);
 
     std::string _scriptsPath;
 

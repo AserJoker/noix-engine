@@ -752,9 +752,10 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
     running = true;
     firstStop = true;
 
-    /* Signal ScriptEngine to start the script.
-       ScriptEngine's thread checks launchRequested, then calls executeScript(). */
-    launchRequested = true;
+    /* Post executeScript as a task on the script thread */
+    if (_engine) {
+        _engine->postTask([this]() { executeScript(); });
+    }
 
     sendResponse(requestSeq, commandName, true, nullptr, nullptr);
 }
