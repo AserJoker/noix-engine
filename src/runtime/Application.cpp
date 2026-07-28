@@ -1,8 +1,12 @@
 #include "runtime/Application.h"
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
-#include "debug/DebugServer.h"
+#include "debug/HttpServer.h"
 #include "debug/DapServer.h"
+#include "debug/commands/PingCommand.h"
+#include "debug/commands/InfoCommand.h"
+#include "debug/commands/SchemaCommand.h"
+#include "debug/commands/SystemShutdownCommand.h"
 #include "resource/ResourcePack.h"
 #include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
@@ -153,13 +157,6 @@ void Application::initDebugServer() {
     _scriptEngine = std::make_unique<script::ScriptEngine>(_basePath);
     _scriptEngine->setDebugEventTypes(_freezeEventType, _resumeEventType);
 
-    /* DebugServer — empty shell HTTP server on --debug-port (default 9900) */
-    uint16_t debugPort = 9900;
-    if (_args.has("debug-port")) debugPort = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
-    _debugServer = std::make_unique<debug::DebugServer>(debugPort, 30);
-    _debugServer->start();
-    core::Logger::instance().info("DebugServer (shell) started on port {}", debugPort);
-
     /* DapServer — DAP protocol debug server */
     bool useStdio = _args.has("dap-stdio");
     uint16_t dapPort = 0;
@@ -168,9 +165,25 @@ void Application::initDebugServer() {
     if (dapPort > 0 || useStdio) {
         _dapServer = std::make_unique<debug::DapServer>(dapPort, *_scriptEngine, useStdio);
         _scriptEngine->setDapBridge(&_dapServer->bridge());
-        _dapServer->start();
-        core::Logger::instance().info("DapServer started ({})", useStdio ? "stdio" : std::to_string(dapPort));
     }
+
+    /* HttpServer — REST API for operations/monitoring */
+    uint16_t httpPort = 9900;
+    if (_args.has("debug-port")) httpPort = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
+    _httpServer = std::make_unique<debug::HttpServer>(httpPort);
+
+    _httpServer->addApi(std::make_shared<debug::PingCommand>());
+    _httpServer->addApi(std::make_shared<debug::InfoCommand>(
+        "0.1.0", dapPort, useStdio ? debug::DapTransportMode::Stdio
+                              : dapPort > 0 ? debug::DapTransportMode::Tcp
+                              : debug::DapTransportMode::None));
+    _httpServer->addApi(std::make_shared<debug::SchemaCommand>(*_httpServer));
+    _httpServer->addApi(std::make_shared<debug::SystemShutdownCommand>(
+        [this]() { requestShutdown(); }));
+
+    if (dapPort > 0 || useStdio) _dapServer->start();
+    _httpServer->start();
+    core::Logger::instance().info("HttpServer started on port {}", httpPort);
 }
 
 void Application::signalHandler(int) {
@@ -257,7 +270,7 @@ void Application::cleanup() {
     if (_cleanedUp) return;
     _cleanedUp = true;
     _dapServer.reset();
-    _debugServer.reset();
+    _httpServer.reset();
     _resourcePack.reset();
     _scriptEngine.reset();
     if (_configManager) {

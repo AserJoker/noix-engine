@@ -33,9 +33,10 @@ add_executable(noix-engine
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
+    src/core/Value.cpp
     src/debug/DapBridge.cpp
     src/debug/DapServer.cpp
-    src/debug/DebugServer.cpp
+    src/debug/HttpServer.cpp
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
     src/script/NativeModules.cpp
@@ -44,6 +45,7 @@ add_executable(noix-engine
 
 target_include_directories(noix-engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/quickjs
 )
@@ -66,6 +68,7 @@ add_executable(dap-debug-bridge
 
 target_include_directories(dap-debug-bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
 )
 

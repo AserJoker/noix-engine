@@ -36,7 +36,7 @@ add_executable(test_integration
     integration/test_debug_server.cpp
 )
 target_link_libraries(test_integration PRIVATE GTest::gtest_main SDL3::SDL3 SDL3_net::SDL3_net)
-target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/integration/helpers)
+target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/integration/helpers)
 
 # ---- Output to dist/ ----
 set_target_properties(test_unit test_integration PROPERTIES

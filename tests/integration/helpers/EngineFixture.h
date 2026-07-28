@@ -29,8 +29,7 @@ protected:
     }
 
     void TearDown() override {
-        // Kill the engine process — DebugServer shell has no shutdown command.
-        // The process will be force-killed after timeout.
+        // Kill the engine process — send shutdown via HTTP, then force-kill if needed.
         if (!waitForProcessExit(3000)) {
             killProcess();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -85,7 +84,7 @@ private:
             std::chrono::milliseconds(10000);
 
         while (std::chrono::steady_clock::now() < deadline) {
-            auto resp = _client->get("/debug/ping");
+            auto resp = _client->post("/api/v1/system/ping", "{}");
             if (resp.statusCode == 200) return;
             _client = std::make_unique<HttpClient>("localhost", _port, 10000);
             std::this_thread::sleep_for(std::chrono::milliseconds(200));

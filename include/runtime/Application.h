@@ -10,7 +10,7 @@
 #include <csignal>
 
 namespace noix::core { class ConfigManager; }
-namespace noix::debug { class DebugServer; class DapServer; }
+namespace noix::debug { class HttpServer; class DapServer; }
 namespace noix::resource { class ResourcePack; }
 namespace noix::script { class ScriptEngine; }
 
@@ -84,7 +84,7 @@ private:
     core::ArgsParser _args;
     std::string _basePath;
     std::unique_ptr<core::ConfigManager> _configManager;
-    std::unique_ptr<debug::DebugServer> _debugServer;
+    std::unique_ptr<debug::HttpServer> _httpServer;
     std::unique_ptr<debug::DapServer> _dapServer;
     std::unique_ptr<resource::ResourcePack> _resourcePack;
     std::unique_ptr<script::ScriptEngine> _scriptEngine;
