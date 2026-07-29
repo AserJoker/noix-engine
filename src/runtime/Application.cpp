@@ -172,7 +172,7 @@ void Application::initDebugServer() {
     /* DebugServer — REST API for operations/monitoring */
     uint16_t httpPort = 9900;
     if (_args.has("debug-port")) httpPort = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
-    _debugServer = std::make_unique<debug::DebugServer>(httpPort);
+    _debugServer = std::make_unique<debug::DebugServer>(httpPort, "/api");
 
     _debugServer->addApi(std::make_shared<debug::PingCommand>());
     _debugServer->addApi(std::make_shared<debug::InfoCommand>(

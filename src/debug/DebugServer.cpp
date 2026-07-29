@@ -7,8 +7,8 @@
 
 namespace noix::debug {
 
-DebugServer::DebugServer(uint16_t port, const std::string& apiPrefix)
-    : _port(port), _apiPrefix(apiPrefix) {}
+DebugServer::DebugServer(uint16_t port, const std::string& apiBase)
+    : _port(port), _apiBase(apiBase) {}
 
 DebugServer::~DebugServer() {
     stop();
@@ -16,28 +16,28 @@ DebugServer::~DebugServer() {
 
 void DebugServer::addApi(std::shared_ptr<Command> cmd) {
     std::lock_guard<std::mutex> lk(_commandsMutex);
-    _commands[cmd->name()] = std::move(cmd);
+    std::string key = cmd->version() + "/" + cmd->name();
+    _commands[key] = std::move(cmd);
 }
 
-std::vector<std::string> DebugServer::apiNames() const {
+std::map<std::string, std::vector<std::string>> DebugServer::apiNamesByVersion() const {
     std::lock_guard<std::mutex> lk(_commandsMutex);
-    std::vector<std::string> names;
-    names.reserve(_commands.size());
-    for (auto& [name, _] : _commands) {
-        names.push_back(name);
+    std::map<std::string, std::vector<std::string>> result;
+    for (auto& [key, cmd] : _commands) {
+        result[cmd->version()].push_back(cmd->name());
     }
-    return names;
+    return result;
 }
 
-Command* DebugServer::findApi(const std::string& name) {
+Command* DebugServer::findApi(const std::string& version, const std::string& name) {
     std::lock_guard<std::mutex> lk(_commandsMutex);
-    auto it = _commands.find(name);
+    auto it = _commands.find(version + "/" + name);
     return it != _commands.end() ? it->second.get() : nullptr;
 }
 
-const Command* DebugServer::findApi(const std::string& name) const {
+const Command* DebugServer::findApi(const std::string& version, const std::string& name) const {
     std::lock_guard<std::mutex> lk(_commandsMutex);
-    auto it = _commands.find(name);
+    auto it = _commands.find(version + "/" + name);
     return it != _commands.end() ? it->second.get() : nullptr;
 }
 
@@ -145,14 +145,22 @@ void DebugServer::serverLoop() {
 }
 
 HandlerResult DebugServer::handleRequest(const std::string& path, const std::string& body) {
-    /* Extract endpoint name from path: /{apiPrefix}/{endpoint} */
-    if (path.size() <= _apiPrefix.size() || path.substr(0, _apiPrefix.size()) != _apiPrefix || path[_apiPrefix.size()] != '/') {
+    /* Extract version and endpoint from path: /{apiBase}/{version}/{endpoint}
+       e.g. "/api/v1/system/ping" → version="v1", endpoint="system/ping" */
+    if (path.size() <= _apiBase.size() || path.substr(0, _apiBase.size()) != _apiBase || path[_apiBase.size()] != '/') {
         return {404, Value::object({{"error", Value("not found")}, {"path", Value(path)}}).dump()};
     }
 
-    std::string endpoint = path.substr(_apiPrefix.size() + 1);
+    std::string rest = path.substr(_apiBase.size() + 1); /* "v1/system/ping" */
+    auto slashPos = rest.find('/');
+    if (slashPos == std::string::npos) {
+        return {404, Value::object({{"error", Value("not found")}, {"path", Value(path)}}).dump()};
+    }
 
-    Command* cmd = findApi(endpoint);
+    std::string version = rest.substr(0, slashPos);   /* "v1" */
+    std::string endpoint = rest.substr(slashPos + 1);  /* "system/ping" */
+
+    Command* cmd = findApi(version, endpoint);
     if (!cmd) {
         return {404, Value::object({{"error", Value("not found")}, {"path", Value(path)}}).dump()};
     }

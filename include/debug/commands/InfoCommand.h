@@ -10,9 +10,9 @@ enum class DapTransportMode { None, Tcp, Stdio };
 
 class InfoCommand : public Command {
 public:
-    InfoCommand(const std::string& version, uint16_t dapPort, DapTransportMode dapTransport,
+    InfoCommand(const std::string& engineVersion, uint16_t dapPort, DapTransportMode dapTransport,
                 const DebugServer& server)
-        : _version(version), _dapPort(dapPort), _dapTransport(dapTransport), _server(server) {}
+        : _engineVersion(engineVersion), _dapPort(dapPort), _dapTransport(dapTransport), _server(server) {}
 
     std::string name() const override { return "system/info"; }
     std::string description() const override { return "Engine identity, API listing, and DAP discovery"; }
@@ -29,8 +29,9 @@ public:
                 "version": {"type": "string"},
                 "api": {
                     "type": "object",
-                    "properties": {
-                        "v1": {"type": "array", "items": {"type": "string"}}
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {"type": "string"}
                     }
                 },
                 "dap": {
@@ -47,17 +48,15 @@ public:
     }
 
     Value execute(const Value& /*request*/) override {
-        /* Build API listing dynamically from registered commands */
-        std::vector<Value> items;
-        for (const auto& name : _server.apiNames()) {
-            items.emplace_back(name);
-        }
-
-        /* Derive version key from prefix: "/api/v1" → "v1" */
-        std::string versionKey = _server.apiPrefix();
-        auto lastSlash = versionKey.rfind('/');
-        if (lastSlash != std::string::npos) {
-            versionKey = versionKey.substr(lastSlash + 1);
+        /* Build API listing grouped by version from registered commands */
+        auto byVersion = _server.apiNamesByVersion();
+        std::map<std::string, Value> apiObj;
+        for (auto& [ver, names] : byVersion) {
+            std::vector<Value> items;
+            for (const auto& name : names) {
+                items.emplace_back(name);
+            }
+            apiObj.emplace(ver, Value::array(std::move(items)));
         }
 
         Value dapObj;
@@ -82,14 +81,14 @@ public:
 
         return Value::object({
             {"name", Value("noix-engine")},
-            {"version", Value(_version)},
-            {"api", Value::object({{versionKey, Value::array(std::move(items))}})},
+            {"version", Value(_engineVersion)},
+            {"api", Value::object(std::move(apiObj))},
             {"dap", dapObj}
         });
     }
 
 private:
-    std::string _version;
+    std::string _engineVersion;
     uint16_t _dapPort;
     DapTransportMode _dapTransport;
     const DebugServer& _server;

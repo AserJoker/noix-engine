@@ -17,6 +17,7 @@ public:
         return R"({
             "type": "object",
             "properties": {
+                "version": {"type": "string", "description": "API version, e.g. v1"},
                 "name": {"type": "string", "description": "Endpoint name"}
             }
         })"_json;
@@ -27,6 +28,7 @@ public:
             "type": "object",
             "properties": {
                 "name":        {"type": "string"},
+                "version":     {"type": "string"},
                 "method":      {"type": "string"},
                 "path":        {"type": "string"},
                 "description": {"type": "string"},
@@ -37,21 +39,23 @@ public:
     }
 
     Value execute(const Value& request) override {
+        std::string version = request.has("version") ? request["version"].asString() : "v1";
         std::string endpointName = request.has("name") ? request["name"].asString() : "";
 
         if (endpointName.empty()) {
             return R"({"error": "missing 'name' field"})"_json;
         }
 
-        const Command* cmd = _server.findApi(endpointName);
+        const Command* cmd = _server.findApi(version, endpointName);
         if (!cmd) {
             return Value::object({{"error", Value("unknown endpoint")}, {"name", Value(endpointName)}});
         }
 
         return Value::object({
             {"name", Value(cmd->name())},
+            {"version", Value(cmd->version())},
             {"method", Value("POST")},
-            {"path", Value("/api/v1/" + cmd->name())},
+            {"path", Value(_server.apiBase() + "/" + cmd->version() + "/" + cmd->name())},
             {"description", Value(cmd->description())},
             {"request", cmd->requestSchema()},
             {"response", cmd->responseSchema()}

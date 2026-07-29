@@ -19,7 +19,7 @@ TEST_F(DebugServerTest, SystemInfo) {
 }
 
 TEST_F(DebugServerTest, SystemSchemaPing) {
-    auto resp = _client->post("/api/v1/system/schema", "{\"name\":\"system/ping\"}");
+    auto resp = _client->post("/api/v1/system/schema", "{\"version\":\"v1\",\"name\":\"system/ping\"}");
     EXPECT_EQ(resp.statusCode, 200);
     EXPECT_NE(resp.body.find("system/ping"), std::string::npos);
     EXPECT_NE(resp.body.find("request"), std::string::npos);
@@ -27,7 +27,7 @@ TEST_F(DebugServerTest, SystemSchemaPing) {
 }
 
 TEST_F(DebugServerTest, SystemSchemaUnknown) {
-    auto resp = _client->post("/api/v1/system/schema", "{\"name\":\"nonexistent\"}");
+    auto resp = _client->post("/api/v1/system/schema", "{\"version\":\"v1\",\"name\":\"nonexistent\"}");
     EXPECT_NE(resp.body.find("unknown endpoint"), std::string::npos);
 }
 

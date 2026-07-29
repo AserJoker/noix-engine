@@ -6,7 +6,7 @@
  * description, JSON Schema for request/response, and an execute method.
  *
  * Name convention: "system/ping", "system/info", "system/shutdown"
- * Maps to POST /api/v1/{name}
+ * Maps to POST /api/{version}/{name}
  */
 
 #include "core/Value.h"
@@ -23,6 +23,9 @@ public:
 
     /// Endpoint name, e.g. "system/ping"
     virtual std::string name() const = 0;
+
+    /// API version this command belongs to, e.g. "v1"
+    virtual std::string version() const { return "v1"; }
 
     /// Human-readable description (for schema self-description)
     virtual std::string description() const = 0;
