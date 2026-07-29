@@ -1,7 +1,7 @@
 #include "runtime/Application.h"
 #include "core/ConfigManager.h"
 #include "core/Logger.h"
-#include "debug/HttpServer.h"
+#include "debug/DebugServer.h"
 #include "debug/DapServer.h"
 #include "debug/commands/PingCommand.h"
 #include "debug/commands/InfoCommand.h"
@@ -169,23 +169,23 @@ void Application::initDebugServer() {
         _scriptEngine->setDapBridge(&_dapServer->bridge());
     }
 
-    /* HttpServer — REST API for operations/monitoring */
+    /* DebugServer — REST API for operations/monitoring */
     uint16_t httpPort = 9900;
     if (_args.has("debug-port")) httpPort = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
-    _httpServer = std::make_unique<debug::HttpServer>(httpPort);
+    _debugServer = std::make_unique<debug::DebugServer>(httpPort);
 
-    _httpServer->addApi(std::make_shared<debug::PingCommand>());
-    _httpServer->addApi(std::make_shared<debug::InfoCommand>(
+    _debugServer->addApi(std::make_shared<debug::PingCommand>());
+    _debugServer->addApi(std::make_shared<debug::InfoCommand>(
         "0.1.0", dapPort, useStdio ? debug::DapTransportMode::Stdio
                               : dapPort > 0 ? debug::DapTransportMode::Tcp
-                              : debug::DapTransportMode::None, *_httpServer));
-    _httpServer->addApi(std::make_shared<debug::SchemaCommand>(*_httpServer));
-    _httpServer->addApi(std::make_shared<debug::SystemShutdownCommand>(
+                              : debug::DapTransportMode::None, *_debugServer));
+    _debugServer->addApi(std::make_shared<debug::SchemaCommand>(*_debugServer));
+    _debugServer->addApi(std::make_shared<debug::SystemShutdownCommand>(
         [this]() { requestShutdown(); }));
 
     if (dapPort > 0 || useStdio) _dapServer->start();
-    _httpServer->start();
-    core::Logger::instance().info("HttpServer started on port {}", httpPort);
+    _debugServer->start();
+    core::Logger::instance().info("DebugServer started on port {}", httpPort);
 }
 
 void Application::signalHandler(int) {
@@ -272,7 +272,7 @@ void Application::cleanup() {
     if (_cleanedUp) return;
     _cleanedUp = true;
     _dapServer.reset();
-    _httpServer.reset();
+    _debugServer.reset();
     _resourcePack.reset();
     _scriptEngine.reset();
     if (_configManager) {

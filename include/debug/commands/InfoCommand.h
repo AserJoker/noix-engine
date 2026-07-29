@@ -1,7 +1,7 @@
 #pragma once
 
 #include "debug/Command.h"
-#include "debug/HttpServer.h"
+#include "debug/DebugServer.h"
 #include "core/Value.h"
 
 namespace noix::debug {
@@ -11,7 +11,7 @@ enum class DapTransportMode { None, Tcp, Stdio };
 class InfoCommand : public Command {
 public:
     InfoCommand(const std::string& version, uint16_t dapPort, DapTransportMode dapTransport,
-                const HttpServer& server)
+                const DebugServer& server)
         : _version(version), _dapPort(dapPort), _dapTransport(dapTransport), _server(server) {}
 
     std::string name() const override { return "system/info"; }
@@ -92,7 +92,7 @@ private:
     std::string _version;
     uint16_t _dapPort;
     DapTransportMode _dapTransport;
-    const HttpServer& _server;
+    const DebugServer& _server;
 };
 
 } // namespace noix::debug

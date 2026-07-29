@@ -2,6 +2,8 @@
 
 #include "debug/Command.h"
 #include "core/Value.h"
+#include <atomic>
+#include <functional>
 
 namespace noix::debug {
 

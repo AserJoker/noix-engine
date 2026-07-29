@@ -1,4 +1,4 @@
-#include "debug/HttpServer.h"
+#include "debug/DebugServer.h"
 #include "core/Logger.h"
 #include "core/Value.h"
 
@@ -7,19 +7,19 @@
 
 namespace noix::debug {
 
-HttpServer::HttpServer(uint16_t port, const std::string& apiPrefix)
+DebugServer::DebugServer(uint16_t port, const std::string& apiPrefix)
     : _port(port), _apiPrefix(apiPrefix) {}
 
-HttpServer::~HttpServer() {
+DebugServer::~DebugServer() {
     stop();
 }
 
-void HttpServer::addApi(std::shared_ptr<Command> cmd) {
+void DebugServer::addApi(std::shared_ptr<Command> cmd) {
     std::lock_guard<std::mutex> lk(_commandsMutex);
     _commands[cmd->name()] = std::move(cmd);
 }
 
-std::vector<std::string> HttpServer::apiNames() const {
+std::vector<std::string> DebugServer::apiNames() const {
     std::lock_guard<std::mutex> lk(_commandsMutex);
     std::vector<std::string> names;
     names.reserve(_commands.size());
@@ -29,39 +29,39 @@ std::vector<std::string> HttpServer::apiNames() const {
     return names;
 }
 
-Command* HttpServer::findApi(const std::string& name) {
+Command* DebugServer::findApi(const std::string& name) {
     std::lock_guard<std::mutex> lk(_commandsMutex);
     auto it = _commands.find(name);
     return it != _commands.end() ? it->second.get() : nullptr;
 }
 
-const Command* HttpServer::findApi(const std::string& name) const {
+const Command* DebugServer::findApi(const std::string& name) const {
     std::lock_guard<std::mutex> lk(_commandsMutex);
     auto it = _commands.find(name);
     return it != _commands.end() ? it->second.get() : nullptr;
 }
 
-void HttpServer::start() {
+void DebugServer::start() {
     if (_running.load()) return;
 
     if (!NET_Init()) {
-        core::Logger::instance().error("HttpServer: NET_Init failed: {}", SDL_GetError());
+        core::Logger::instance().error("DebugServer: NET_Init failed: {}", SDL_GetError());
         return;
     }
 
     _server = NET_CreateServer(nullptr, _port, 0);
     if (!_server) {
-        core::Logger::instance().error("HttpServer: NET_CreateServer failed on port {}: {}", _port, SDL_GetError());
+        core::Logger::instance().error("DebugServer: NET_CreateServer failed on port {}: {}", _port, SDL_GetError());
         NET_Quit();
         return;
     }
 
     _running = true;
-    _thread = std::thread(&HttpServer::serverLoop, this);
-    core::Logger::instance().info("HttpServer listening on port {}", _port);
+    _thread = std::thread(&DebugServer::serverLoop, this);
+    core::Logger::instance().info("DebugServer listening on port {}", _port);
 }
 
-void HttpServer::stop() {
+void DebugServer::stop() {
     if (!_running.load()) return;
     _running = false;
 
@@ -75,7 +75,7 @@ void HttpServer::stop() {
     NET_Quit();
 }
 
-void HttpServer::serverLoop() {
+void DebugServer::serverLoop() {
     while (_running.load()) {
         NET_StreamSocket* client = nullptr;
         NET_AcceptClient(_server, &client);
@@ -141,10 +141,10 @@ void HttpServer::serverLoop() {
         NET_DestroyStreamSocket(client);
     }
 
-    core::Logger::instance().info("HttpServer: server thread exited");
+    core::Logger::instance().info("DebugServer: server thread exited");
 }
 
-HandlerResult HttpServer::handleRequest(const std::string& path, const std::string& body) {
+HandlerResult DebugServer::handleRequest(const std::string& path, const std::string& body) {
     /* Extract endpoint name from path: /{apiPrefix}/{endpoint} */
     if (path.size() <= _apiPrefix.size() || path.substr(0, _apiPrefix.size()) != _apiPrefix || path[_apiPrefix.size()] != '/') {
         return {404, Value::object({{"error", Value("not found")}, {"path", Value(path)}}).dump()};

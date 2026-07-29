@@ -1,14 +1,14 @@
 #pragma once
 
 #include "debug/Command.h"
-#include "debug/HttpServer.h"
+#include "debug/DebugServer.h"
 #include "core/Value.h"
 
 namespace noix::debug {
 
 class SchemaCommand : public Command {
 public:
-    explicit SchemaCommand(const HttpServer& server) : _server(server) {}
+    explicit SchemaCommand(const DebugServer& server) : _server(server) {}
 
     std::string name() const override { return "system/schema"; }
     std::string description() const override { return "Query JSON Schema for an API endpoint"; }
@@ -59,7 +59,7 @@ public:
     }
 
 private:
-    const HttpServer& _server;
+    const DebugServer& _server;
 };
 
 } // namespace noix::debug

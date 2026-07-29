@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * HttpServer — lightweight HTTP server with external Command registration.
+ * DebugServer — lightweight HTTP server with external Command registration.
  * All endpoints use POST with JSON request/response bodies.
  * Route: POST /{apiPrefix}/{endpoint} → findApi(endpoint) → execute(request)
  */
@@ -25,13 +25,13 @@ struct HandlerResult {
     std::string body;
 };
 
-class HttpServer {
+class DebugServer {
 public:
-    HttpServer(uint16_t port, const std::string& apiPrefix = "/api/v1");
-    ~HttpServer();
+    DebugServer(uint16_t port, const std::string& apiPrefix = "/api/v1");
+    ~DebugServer();
 
-    HttpServer(const HttpServer&) = delete;
-    HttpServer& operator=(const HttpServer&) = delete;
+    DebugServer(const DebugServer&) = delete;
+    DebugServer& operator=(const DebugServer&) = delete;
 
     void start();
     void stop();

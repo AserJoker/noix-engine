@@ -42,7 +42,7 @@ add_executable(noix-engine
     src/debug/DapBridgeUtils.cpp
     src/debug/SourceMap.cpp
     src/debug/DapServer.cpp
-    src/debug/HttpServer.cpp
+    src/debug/DebugServer.cpp
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
     src/script/NativeModules.cpp
