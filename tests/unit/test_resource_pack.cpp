@@ -16,17 +16,17 @@ protected:
         std::filesystem::create_directories(_tmpDir);
 
         // Default pack structure:
-        //   _tmpDir/resources/noix/textures/stone.png
-        auto defaultRes = _tmpDir / "resources" / "noix" / "textures";
+        //   _tmpDir/assets/noix/textures/stone.png
+        auto defaultRes = _tmpDir / "assets" / "noix" / "textures";
         std::filesystem::create_directories(defaultRes);
         writeText(defaultRes / "stone.png", "default");
 
         // External pack structure:
-        //   _extPack/resources/noix/textures/stone.png  (override)
-        //   _extPack/resources/mymod/sprites/player.png
+        //   _extPack/assets/noix/textures/stone.png  (override)
+        //   _extPack/assets/mymod/sprites/player.png
         _extPack = _tmpDir / "ext_pack";
-        auto extNoix = _extPack / "resources" / "noix" / "textures";
-        auto extMod = _extPack / "resources" / "mymod" / "sprites";
+        auto extNoix = _extPack / "assets" / "noix" / "textures";
+        auto extMod = _extPack / "assets" / "mymod" / "sprites";
         std::filesystem::create_directories(extNoix);
         std::filesystem::create_directories(extMod);
         writeText(extNoix / "stone.png", "override");
@@ -49,7 +49,7 @@ TEST_F(ResourcePackTest, ResolveDefaultResource) {
     ResourcePack pack(_tmpDir);
     auto result = pack.resolve(NamespacedId("noix", "textures/stone.png"));
     ASSERT_TRUE(result.has_value());
-    EXPECT_TRUE(result->string().find("resources") != std::string::npos);
+    EXPECT_TRUE(result->string().find("assets") != std::string::npos);
 }
 
 TEST_F(ResourcePackTest, ResolveUnqualified) {
@@ -121,8 +121,8 @@ TEST_F(ResourcePackTest, MovePackUp) {
     // Create two external packs with the same resource
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
-    auto dir1 = pack1 / "resources" / "noix" / "textures";
-    auto dir2 = pack2 / "resources" / "noix" / "textures";
+    auto dir1 = pack1 / "assets" / "noix" / "textures";
+    auto dir2 = pack2 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     std::filesystem::create_directories(dir2);
     writeText(dir1 / "stone.png", "pack1");
@@ -149,8 +149,8 @@ TEST_F(ResourcePackTest, MovePackUp) {
 TEST_F(ResourcePackTest, MovePackDown) {
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
-    auto dir1 = pack1 / "resources" / "noix" / "textures";
-    auto dir2 = pack2 / "resources" / "noix" / "textures";
+    auto dir1 = pack1 / "assets" / "noix" / "textures";
+    auto dir2 = pack2 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     std::filesystem::create_directories(dir2);
     writeText(dir1 / "stone.png", "pack1");
@@ -170,7 +170,7 @@ TEST_F(ResourcePackTest, MovePackDown) {
 
 TEST_F(ResourcePackTest, MovePackUpAlreadyHighest) {
     auto pack1 = _tmpDir / "pack1";
-    auto dir1 = pack1 / "resources" / "noix" / "textures";
+    auto dir1 = pack1 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     writeText(dir1 / "stone.png", "pack1");
 
@@ -181,7 +181,7 @@ TEST_F(ResourcePackTest, MovePackUpAlreadyHighest) {
 
 TEST_F(ResourcePackTest, MovePackDownAlreadyLowest) {
     auto pack1 = _tmpDir / "pack1";
-    auto dir1 = pack1 / "resources" / "noix" / "textures";
+    auto dir1 = pack1 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     writeText(dir1 / "stone.png", "pack1");
 
@@ -199,8 +199,8 @@ TEST_F(ResourcePackTest, MovePackNotFound) {
 TEST_F(ResourcePackTest, ListPacks) {
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
-    std::filesystem::create_directories(pack1 / "resources");
-    std::filesystem::create_directories(pack2 / "resources");
+    std::filesystem::create_directories(pack1 / "assets");
+    std::filesystem::create_directories(pack2 / "assets");
 
     ResourcePack pack(_tmpDir);
     pack.addPack(pack1);

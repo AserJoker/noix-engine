@@ -67,7 +67,7 @@ bool ResourcePack::exists(const core::NamespacedId& id) const {
 }
 
 std::filesystem::path ResourcePack::toRelativePath(const core::NamespacedId& id) {
-    return std::filesystem::path("resources") / id.ns() / id.name();
+    return std::filesystem::path("assets") / id.ns() / id.name();
 }
 
 std::vector<std::filesystem::path>::iterator ResourcePack::findPack(const std::filesystem::path& packPath) {

@@ -8,6 +8,7 @@
 #include "debug/commands/SchemaCommand.h"
 #include "debug/commands/SystemShutdownCommand.h"
 #include "resource/ResourcePack.h"
+#include "runtime/Locale.h"
 #include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
@@ -100,7 +101,7 @@ bool Application::initWindow() {
     if (mode == WindowMode::Fullscreen) flags = SDL_WINDOW_FULLSCREEN;
     else if (mode == WindowMode::Borderless) flags = SDL_WINDOW_BORDERLESS;
 
-    _window = SDL_CreateWindow("noix-engine", width, height, flags);
+    _window = SDL_CreateWindow(Locale::instance().i18n("noix:system.window.title","noix-engine").c_str(), width, height, flags);
     if (!_window) {
         core::Logger::instance().error("SDL_CreateWindow failed: {}", SDL_GetError());
         return false;
@@ -148,6 +149,10 @@ void Application::initLogger() {
 void Application::initResourcePack() {
     _resourcePack = std::make_unique<resource::ResourcePack>(_basePath);
     core::Logger::instance().info("ResourcePack initialized (basePath={})", _basePath);
+
+    /* Initialize Locale with the resource pack for i18n support */
+    runtime::Locale::instance().setResourcePack(_resourcePack.get());
+    runtime::Locale::instance().setLang("en_US");
 }
 
 void Application::initDebugServer() {
