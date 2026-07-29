@@ -178,7 +178,7 @@ void Application::initDebugServer() {
     _httpServer->addApi(std::make_shared<debug::InfoCommand>(
         "0.1.0", dapPort, useStdio ? debug::DapTransportMode::Stdio
                               : dapPort > 0 ? debug::DapTransportMode::Tcp
-                              : debug::DapTransportMode::None));
+                              : debug::DapTransportMode::None, *_httpServer));
     _httpServer->addApi(std::make_shared<debug::SchemaCommand>(*_httpServer));
     _httpServer->addApi(std::make_shared<debug::SystemShutdownCommand>(
         [this]() { requestShutdown(); }));

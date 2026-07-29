@@ -6,8 +6,8 @@
 
 namespace noix::debug {
 
-HttpServer::HttpServer(uint16_t port)
-    : _port(port) {}
+HttpServer::HttpServer(uint16_t port, const std::string& apiPrefix)
+    : _port(port), _apiPrefix(apiPrefix) {}
 
 HttpServer::~HttpServer() {
     stop();
@@ -144,13 +144,12 @@ void HttpServer::serverLoop() {
 }
 
 HandlerResult HttpServer::handleRequest(const std::string& path, const std::string& body) {
-    /* Extract endpoint name from path: /api/v1/{endpoint} */
-    const std::string prefix = "/api/v1/";
-    if (path.size() <= prefix.size() || path.substr(0, prefix.size()) != prefix) {
+    /* Extract endpoint name from path: /{apiPrefix}/{endpoint} */
+    if (path.size() <= _apiPrefix.size() || path.substr(0, _apiPrefix.size()) != _apiPrefix || path[_apiPrefix.size()] != '/') {
         return {404, Value::object({{"error", Value("not found")}, {"path", Value(path)}}).dump()};
     }
 
-    std::string endpoint = path.substr(prefix.size());
+    std::string endpoint = path.substr(_apiPrefix.size() + 1);
 
     Command* cmd = findApi(endpoint);
     if (!cmd) {
