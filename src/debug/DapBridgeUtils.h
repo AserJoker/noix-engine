@@ -4,14 +4,14 @@
  * DapBridgeUtils.h — Internal header for DAP debug module utilities.
  *
  * This header is NOT installed. It is only included by source files within
- * the debug module that need access to transport functions, JSON helpers,
- * path helpers, module loading, and JSValue formatting.
+ * the debug module that need access to JSON helpers, path helpers,
+ * module loading, and JSValue formatting.
+ *
+ * Transport functions have been moved to DapSocket.
  */
 
 #include "quickjs.h"
 
-#include <atomic>
-#include <mutex>
 #include <string>
 
 struct cJSON;
@@ -19,24 +19,6 @@ struct cJSON;
 namespace noix::debug {
 
 class ObjectRefStore;
-struct DapTransport;
-struct TcpCtx;
-
-/* ---- Transport initialization ---- */
-
-void init_stdio_transport(DapTransport *t);
-bool init_tcp_transport(DapTransport *t, TcpCtx *tcp, int port,
-                         std::atomic<bool> &shuttingDown);
-bool tcp_accept_client(TcpCtx *tcp);
-int tcp_read_byte(void *ctx);
-void tcp_write_message(void *ctx, const std::string &msg);
-void cleanup_tcp(TcpCtx *tcp);
-
-/* ---- DAP wire protocol ---- */
-
-bool dap_read_message(DapTransport &transport, std::string &out);
-void dap_write_message(DapTransport &transport, std::mutex &writeMutex,
-                        const std::string &json);
 
 /* ---- JSON helpers ---- */
 

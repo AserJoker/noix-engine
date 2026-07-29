@@ -148,11 +148,41 @@ void SourceMap::resolveSourcePaths(const std::string &jsAbsPath) {
         }
         /* Normalize separators */
         std::replace(combined.begin(), combined.end(), '\\', '/');
-        /* Lowercase drive letter on Windows */
-        if (combined.size() >= 2 && combined[1] == ':') {
-            combined[0] = static_cast<char>(tolower(combined[0]));
+        /* Resolve . and .. components */
+        std::vector<std::string> parts;
+        std::string part;
+        for (size_t i = 0; i <= combined.size(); i++) {
+            if (i == combined.size() || combined[i] == '/') {
+                if (part == "..") {
+                    if (!parts.empty() && parts.back() != "..") parts.pop_back();
+                } else if (part != "." && !part.empty()) {
+                    parts.push_back(part);
+                }
+                part.clear();
+            } else {
+                part += combined[i];
+            }
         }
-        src = combined;
+        /* Rebuild path */
+        std::string resolved;
+        /* Check for drive letter prefix */
+        if (!parts.empty() && parts[0].size() == 2 && parts[0][1] == ':') {
+            resolved = parts[0] + "/";
+            for (size_t i = 1; i < parts.size(); i++) {
+                if (i > 1) resolved += "/";
+                resolved += parts[i];
+            }
+        } else {
+            for (size_t i = 0; i < parts.size(); i++) {
+                if (i > 0) resolved += "/";
+                resolved += parts[i];
+            }
+        }
+        /* Lowercase drive letter on Windows */
+        if (resolved.size() >= 2 && resolved[1] == ':') {
+            resolved[0] = static_cast<char>(tolower(resolved[0]));
+        }
+        src = resolved;
     }
 }
 
@@ -309,12 +339,20 @@ int SourceMap::originalLine(int generatedLine) const {
 
 int SourceMap::originalLine(int generatedLine, int generatedColumn) const {
     const Mapping *m = findGeneratedMapping(generatedLine, generatedColumn);
-    return m ? m->originalLine : -1;
+    if (!m) return generatedLine;
+    /* Source map spec: if the closest mapping is on a different generated line,
+       the query position is unmapped — return the same line number as the
+       generated position. TypeScript doesn't emit mappings for lines identical
+       to the source, so unmapped lines map to themselves. */
+    if (m->generatedLine != generatedLine) return generatedLine;
+    return m->originalLine;
 }
 
 int SourceMap::originalColumn(int generatedLine, int generatedColumn) const {
     const Mapping *m = findGeneratedMapping(generatedLine, generatedColumn);
-    return m ? m->originalColumn : -1;
+    if (!m) return 0;
+    if (m->generatedLine != generatedLine) return 0;
+    return m->originalColumn;
 }
 
 /* ---- Original → Generated ---- */

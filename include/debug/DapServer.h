@@ -3,7 +3,6 @@
 #include "debug/DapBridge.h"
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <thread>
 
@@ -13,7 +12,7 @@ namespace noix::debug {
 
 class DapServer {
 public:
-    DapServer(uint16_t port, script::ScriptEngine& engine, bool useStdio = false);
+    DapServer(uint16_t port, script::ScriptEngine& engine);
     ~DapServer();
 
     DapServer(const DapServer&) = delete;
@@ -29,10 +28,8 @@ private:
     void readerThreadFunc();
 
     uint16_t _port;
-    bool _useStdio;
     script::ScriptEngine& _engine;
     DapBridge _bridge;
-    std::unique_ptr<TcpCtx> _tcpCtx;
     std::thread _readerThread;
 };
 

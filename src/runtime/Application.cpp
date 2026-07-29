@@ -159,13 +159,12 @@ void Application::initDebugServer() {
     _scriptEngine = std::make_unique<script::ScriptEngine>(_basePath);
     _scriptEngine->setDebugEventTypes(_freezeEventType, _resumeEventType);
 
-    /* DapServer — DAP protocol debug server */
-    bool useStdio = _args.has("dap-stdio");
+    /* DapServer — DAP protocol debug server (TCP only) */
     uint16_t dapPort = 0;
     if (_args.has("dap-port")) dapPort = static_cast<uint16_t>(std::stoi(_args.get("dap-port")));
 
-    if (dapPort > 0 || useStdio) {
-        _dapServer = std::make_unique<debug::DapServer>(dapPort, *_scriptEngine, useStdio);
+    if (dapPort > 0) {
+        _dapServer = std::make_unique<debug::DapServer>(dapPort, *_scriptEngine);
         _scriptEngine->setDapBridge(&_dapServer->bridge());
     }
 
@@ -173,17 +172,17 @@ void Application::initDebugServer() {
     uint16_t httpPort = 9900;
     if (_args.has("debug-port")) httpPort = static_cast<uint16_t>(std::stoi(_args.get("debug-port")));
     _debugServer = std::make_unique<debug::DebugServer>(httpPort, "/api");
+    _scriptEngine->setDebugServer(_debugServer.get());
 
     _debugServer->addApi(std::make_shared<debug::PingCommand>());
     _debugServer->addApi(std::make_shared<debug::InfoCommand>(
-        "0.1.0", dapPort, useStdio ? debug::DapTransportMode::Stdio
-                              : dapPort > 0 ? debug::DapTransportMode::Tcp
-                              : debug::DapTransportMode::None, *_debugServer));
+        "0.1.0", dapPort, dapPort > 0 ? debug::DapTransportMode::Tcp
+                                      : debug::DapTransportMode::None, *_debugServer));
     _debugServer->addApi(std::make_shared<debug::SchemaCommand>(*_debugServer));
     _debugServer->addApi(std::make_shared<debug::SystemShutdownCommand>(
         [this]() { requestShutdown(); }));
 
-    if (dapPort > 0 || useStdio) _dapServer->start();
+    if (dapPort > 0) _dapServer->start();
     _debugServer->start();
     core::Logger::instance().info("DebugServer started on port {}", httpPort);
 }

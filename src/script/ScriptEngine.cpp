@@ -1,6 +1,9 @@
 #include "script/ScriptEngine.h"
 #include "debug/DapBridge.h"
+#include "debug/DebugServer.h"
+#include "debug/commands/ScriptCallbackCommand.h"
 #include "core/Logger.h"
+#include "core/Value.h"
 #include "script/NativeModules.h"
 
 #include "quickjs.h"
@@ -89,6 +92,31 @@ void ScriptEngine::stop() {
     core::Logger::instance().info("ScriptEngine stopped");
 }
 
+void ScriptEngine::reset() {
+    core::Logger::instance().info("ScriptEngine::reset: dispatching reset to script thread");
+    postTask([this]() {
+        core::Logger::instance().info("ScriptEngine::reset: releasing callbacks...");
+
+        /* 1. Release all JS callback references before freeing the context */
+        releaseCallbacks();
+
+        /* 2. Tear down QuickJS */
+        if (_dapBridge) {
+            _dapBridge->rt = nullptr;
+            _dapBridge->ctx = nullptr;
+        }
+        if (_ctx) { JS_FreeContext(_ctx); _ctx = nullptr; }
+        if (_rt) { JS_RunGC(_rt); JS_FreeRuntime(_rt); _rt = nullptr; }
+
+        core::Logger::instance().info("ScriptEngine::reset: QuickJS torn down");
+
+        /* 3. Reinitialize */
+        initQuickJS();
+
+        core::Logger::instance().info("ScriptEngine::reset: complete");
+    });
+}
+
 void ScriptEngine::postTask(std::function<void()> task) {
     {
         std::lock_guard lock(_queueMutex);
@@ -121,8 +149,114 @@ void ScriptEngine::setDebugEventTypes(uint32_t freezeType, uint32_t resumeType) 
     _resumeEventType = resumeType;
 }
 
-void ScriptEngine::scriptThreadFunc() {
-    /* Create QuickJS runtime and context */
+void ScriptEngine::registerCallback(const std::string& name, JSContext* ctx, JSValue callback) {
+    JS_DupValue(ctx, callback);
+    CallbackEntry entry{ctx, reinterpret_cast<void*>(JS_VALUE_GET_PTR(callback))};
+    std::lock_guard lock(_callbacksMutex);
+    _callbacks[name] = std::move(entry);
+}
+
+noix::core::Value ScriptEngine::invokeCallback(const std::string& name, const noix::core::Value& request) {
+    CallbackEntry entry;
+    {
+        std::lock_guard lock(_callbacksMutex);
+        auto it = _callbacks.find(name);
+        if (it == _callbacks.end()) {
+            return core::Value::object({{"error", core::Value("callback not found: " + name)}});
+        }
+        entry = it->second;
+    }
+
+    std::mutex waitMutex;
+    std::condition_variable waitCv;
+    bool done = false;
+    core::Value result;
+
+    postTask([&, entry]() {
+        JSValue jsCallback = JS_MKPTR(JS_TAG_OBJECT, entry.callback);
+
+        /* Convert request Value to a JS object via JSON parse */
+        std::string requestJson = request.dump();
+        JSValue argv[] = { JS_ParseJSON(entry.ctx, requestJson.c_str(), requestJson.size(), "<request>") };
+        JSValue jsResult = JS_Call(entry.ctx, jsCallback, JS_UNDEFINED, 1, argv);
+        JS_FreeValue(entry.ctx, argv[0]);
+
+        /* Convert JS result back to Value.
+           Accepts both objects (JSON.stringify internally) and strings. */
+        core::Value responseValue;
+        if (JS_IsException(jsResult)) {
+            JSValue exc = JS_GetException(entry.ctx);
+            const char* err = JS_ToCString(entry.ctx, exc);
+            responseValue = core::Value::object({{"error", core::Value(err ? err : "script exception")}});
+            if (err) JS_FreeCString(entry.ctx, err);
+            JS_FreeValue(entry.ctx, exc);
+        } else if (JS_IsString(jsResult)) {
+            const char* s = JS_ToCString(entry.ctx, jsResult);
+            if (s) {
+                responseValue = core::Value::parse(std::string(s));
+                JS_FreeCString(entry.ctx, s);
+            }
+            if (responseValue.isNull()) {
+                responseValue = core::Value::object();
+            }
+        } else if (!JS_IsUndefined(jsResult) && !JS_IsNull(jsResult)) {
+            /* Object/array/number/bool — stringify then parse to Value */
+            JSValue jsonStr = JS_JSONStringify(entry.ctx, jsResult, JS_UNDEFINED, JS_UNDEFINED);
+            if (JS_IsString(jsonStr)) {
+                const char* s = JS_ToCString(entry.ctx, jsonStr);
+                if (s) {
+                    responseValue = core::Value::parse(std::string(s));
+                    JS_FreeCString(entry.ctx, s);
+                }
+            }
+            JS_FreeValue(entry.ctx, jsonStr);
+            if (responseValue.isNull()) {
+                responseValue = core::Value::object();
+            }
+        } else {
+            /* undefined/null return — empty object */
+            responseValue = core::Value::object();
+        }
+        JS_FreeValue(entry.ctx, jsResult);
+
+        {
+            std::lock_guard<std::mutex> lk(waitMutex);
+            result = std::move(responseValue);
+            done = true;
+        }
+        waitCv.notify_one();
+    });
+
+    /* Wait for script thread to finish (with timeout for shutdown safety) */
+    std::unique_lock<std::mutex> lk(waitMutex);
+    while (!done) {
+        if (waitCv.wait_for(lk, std::chrono::milliseconds(5000)) == std::cv_status::timeout) {
+            return core::Value::object({{"error", core::Value("script callback timed out")}});
+        }
+    }
+
+    return result;
+}
+
+void ScriptEngine::releaseCallbacks() {
+    std::map<std::string, CallbackEntry> callbacks;
+    {
+        std::lock_guard lock(_callbacksMutex);
+        callbacks = std::move(_callbacks);
+    }
+
+    /* Must free JSValues on the script thread */
+    for (auto& [name, entry] : callbacks) {
+        auto* cb = entry.callback;
+        auto* ctx = entry.ctx;
+        postTask([ctx, cb]() {
+            JSValue val = JS_MKPTR(JS_TAG_OBJECT, cb);
+            JS_FreeValue(ctx, val);
+        });
+    }
+}
+
+void ScriptEngine::initQuickJS() {
     _rt = JS_NewRuntime();
     _ctx = JS_NewContext(_rt);
 
@@ -131,8 +265,6 @@ void ScriptEngine::scriptThreadFunc() {
         return;
     }
 
-    /* Set interrupt handler so scripts with infinite loops can be terminated
-       when the engine shuts down (_running becomes false). */
     JS_SetInterruptHandler(_rt, jsInterruptHandler, this);
 
     /* Wire up DAP bridge if present */
@@ -148,10 +280,10 @@ void ScriptEngine::scriptThreadFunc() {
 
     core::Logger::instance().info("ScriptEngine: QuickJS runtime initialized");
 
-    /* Register native modules (noix:logger, etc.) */
-    registerNativeModules(_ctx);
+    /* Register native modules */
+    registerNativeModules(_ctx, this);
 
-    /* Set up module loader for file-based JS imports */
+    /* Set up module loader */
     JS_SetModuleLoaderFunc(_rt, nullptr, moduleLoader, this);
 
     /* Load entry script */
@@ -159,6 +291,10 @@ void ScriptEngine::scriptThreadFunc() {
     if (!loadScript(entryPath)) {
         core::Logger::instance().warn("ScriptEngine: entry script not found: {}", entryPath);
     }
+}
+
+void ScriptEngine::scriptThreadFunc() {
+    initQuickJS();
 
     /* Job loop: keep thread alive, process tasks on demand */
     while (_running.load()) {
@@ -176,7 +312,12 @@ void ScriptEngine::scriptThreadFunc() {
         }
     }
 
-    /* Cleanup QuickJS */
+    /* Cleanup QuickJS — release all JS callbacks before freeing context */
+    releaseCallbacks();
+
+    /* Drain any pending releaseCallback tasks */
+    drainTaskQueue();
+
     if (_dapBridge) {
         _dapBridge->rt = nullptr;
         _dapBridge->ctx = nullptr;

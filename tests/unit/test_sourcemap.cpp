@@ -39,8 +39,8 @@ var z = 3;
     EXPECT_EQ(sm.originalLine(1), 1);
     EXPECT_EQ(sm.originalLine(2), 2);
     EXPECT_EQ(sm.originalLine(3), 3);
-    /* Line 4 has no segment in the mappings */
-    EXPECT_EQ(sm.originalLine(4), 3);  /* last mapping covers line 3, binary search finds it */
+    /* Line 4 has no segment in the mappings — unmapped lines map to themselves */
+    EXPECT_EQ(sm.originalLine(4), 4);
 }
 
 TEST(SourceMap, OriginalToGeneratedLine) {
@@ -114,15 +114,9 @@ var y = 2;
     EXPECT_EQ(sm.originalLine(2), 1);
     /* JS line 3 → TS line 2 */
     EXPECT_EQ(sm.originalLine(3), 2);
-    /* JS line 1 has no mapping ("use strict" is not in TS) — binary search finds
-       no segment with generatedLine=1, but the best match from the search is
-       the last entry with generatedLine <= 1. Since there are no segments on
-       generated line 1, the search will find nothing. */
-    /* Actually with our binary search, looking for (genLine=1, genCol=0) will
-       find nothing because no mapping has generatedLine=1. It will return the
-       best mapping with generatedLine <= 1, which would be none since mappings
-       start at generatedLine=2. So result should be -1. */
-    EXPECT_EQ(sm.originalLine(1), -1);
+    /* JS line 1 has no mapping ("use strict" is not in TS).
+       With the fix, unmapped lines return the query line number itself. */
+    EXPECT_EQ(sm.originalLine(1), 1);
 
     /* Reverse: TS line 1 → JS line 2 */
     EXPECT_EQ(sm.generatedLine(1), 2);

@@ -38,14 +38,17 @@ add_executable(noix-engine
     src/debug/DapBridgeHandlers.cpp
     src/debug/DapBridgeExecute.cpp
     src/debug/DapObjectRefStore.cpp
-    src/debug/DapTransport.cpp
+    src/debug/DapSocket.cpp
     src/debug/DapBridgeUtils.cpp
     src/debug/SourceMap.cpp
     src/debug/DapServer.cpp
     src/debug/DebugServer.cpp
+    src/debug/ScriptCallbackCommand.cpp
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
     src/script/NativeModules.cpp
+    src/script/modules/LoggerModule.cpp
+    src/script/modules/DebugModule.cpp
     src/script/ScriptEngine.cpp
 )
 

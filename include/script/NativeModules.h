@@ -4,7 +4,13 @@ struct JSContext;
 
 namespace noix::script {
 
-/// 注册所有原生 C 模块到 QuickJS context（脚本线程调用）
-void registerNativeModules(JSContext* ctx);
+class ScriptEngine;
+
+/// Register all native C modules into the QuickJS context (called on script thread)
+void registerNativeModules(JSContext* ctx, ScriptEngine* engine);
+
+/// Individual module registration (called by registerNativeModules)
+void registerLoggerModule(JSContext* ctx);
+void registerDebugModule(JSContext* ctx);
 
 } // namespace noix::script

@@ -3,15 +3,26 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
+#include <vector>
 
 struct JSRuntime;
 struct JSContext;
+struct JSValue;
 
-namespace noix::debug { class DapBridge; }
+namespace noix::core {
+    class Value;
+}
+
+namespace noix::debug {
+    class DapBridge;
+    class DebugServer;
+}
 
 namespace noix::script {
 
@@ -23,40 +34,69 @@ public:
     ScriptEngine(const ScriptEngine&) = delete;
     ScriptEngine& operator=(const ScriptEngine&) = delete;
 
-    /// 启动脚本线程
+    /// Start the script thread
     void start();
 
-    /// 优雅停止脚本线程
+    /// Gracefully stop the script thread
     void stop();
 
-    /// 向脚本线程投递任务（线程安全）
+    /// Tear down and reinitialize QuickJS runtime/context (hot-reload support).
+    /// Must be called from outside the script thread (dispatches work internally).
+    void reset();
+
+    /// Post a task to the script thread (thread-safe)
     void postTask(std::function<void()> task);
 
-    /// 排空任务队列（脚本线程调用，用于暂停循环中处理命令）
+    /// Drain the task queue (called from script thread during debug pauses)
     void drainTaskQueue();
 
-    /// 获取脚本目录路径
+    /// Get the scripts directory path
     const std::string& scriptsPath() const { return _scriptsPath; }
 
-    /// 设置 DAP bridge（在 start 前调用）
+    /// Set DAP bridge (call before start)
     void setDapBridge(debug::DapBridge* bridge);
 
-    /// 获取 DAP bridge
+    /// Get DAP bridge
     debug::DapBridge* dapBridge() const { return _dapBridge; }
 
-    /// 设置调试冻结/恢复 SDL 事件类型
+    /// Set DebugServer back-pointer (call before start)
+    void setDebugServer(debug::DebugServer* server) { _debugServer = server; }
+
+    /// Get DebugServer
+    debug::DebugServer* debugServer() const { return _debugServer; }
+
+    /// Set debug freeze/resume SDL event types
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
 
-    /// 检查脚本线程是否在运行（用于 interrupt handler）
+    /// Check if script thread is running (for interrupt handler)
     bool isRunning() const { return _running.load(); }
 
-    /// QuickJS runtime/context 访问（仅脚本线程）
+    /// QuickJS runtime/context access (script thread only)
     JSRuntime* runtime() const { return _rt; }
     JSContext* context() const { return _ctx; }
+
+    /// Store a named JS callback (called from script thread during module init).
+    /// Duplicates the JSValue reference; caller does not need to keep it alive.
+    void registerCallback(const std::string& name, JSContext* ctx, JSValue callback);
+
+    /// Invoke a named JS callback from any thread.
+    /// Posts JS_Call to script thread, waits for result, returns response Value.
+    /// Returns error Value if callback not found or timed out.
+    noix::core::Value invokeCallback(const std::string& name, const noix::core::Value& request);
+
+    /// Release all stored JS callbacks on the script thread (called during reset/shutdown).
+    void releaseCallbacks();
 
 private:
     void scriptThreadFunc();
     bool loadScript(const std::string& path);
+    void initQuickJS();
+
+    /// Internal callback entry
+    struct CallbackEntry {
+        JSContext* ctx;
+        void* callback;  /* JS_VALUE_GET_PTR stored as void* */
+    };
 
     std::string _scriptsPath;
 
@@ -66,14 +106,21 @@ private:
     std::queue<std::function<void()>> _taskQueue;
     std::atomic<bool> _running{false};
 
-    /// QuickJS runtime（脚本线程所有）
+    /// QuickJS runtime (owned by script thread)
     JSRuntime* _rt = nullptr;
     JSContext* _ctx = nullptr;
 
     /// DAP bridge
     debug::DapBridge* _dapBridge = nullptr;
 
-    // 调试事件类型（在 start 前设置）
+    /// DebugServer back-pointer
+    debug::DebugServer* _debugServer = nullptr;
+
+    /// Named JS callbacks (owned by ScriptEngine, guarded by _callbacksMutex)
+    std::map<std::string, CallbackEntry> _callbacks;
+    std::mutex _callbacksMutex;
+
+    // Debug event types (set before start)
     uint32_t _freezeEventType{0};
     uint32_t _resumeEventType{0};
 };

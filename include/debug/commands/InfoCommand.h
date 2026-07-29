@@ -6,7 +6,7 @@
 
 namespace noix::debug {
 
-enum class DapTransportMode { None, Tcp, Stdio };
+enum class DapTransportMode { None, Tcp };
 
 class InfoCommand : public Command {
 public:
@@ -38,7 +38,7 @@ public:
                     "type": "object",
                     "properties": {
                         "available": {"type": "boolean"},
-                        "transport": {"type": "string", "enum": ["tcp", "stdio", "none"]},
+                        "transport": {"type": "string", "enum": ["tcp", "none"]},
                         "host": {"type": "string"},
                         "port": {"type": "integer"}
                     }
@@ -67,11 +67,6 @@ public:
                 "host": "127.0.0.1"
             })"_json;
             dapObj.asObject().emplace("port", Value(static_cast<int>(_dapPort)));
-        } else if (_dapTransport == DapTransportMode::Stdio) {
-            dapObj = R"({
-                "available": true,
-                "transport": "stdio"
-            })"_json;
         } else {
             dapObj = R"({
                 "available": false,

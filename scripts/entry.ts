@@ -1,2 +1,6 @@
 import { info } from "noix:logger";
-info("hello world");
+import { registerCommand } from "noix:debug";
+registerCommand("script/test", () => {
+  info("script command attched");
+  return {};
+});

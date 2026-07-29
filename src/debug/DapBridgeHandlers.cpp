@@ -19,6 +19,22 @@
 
 namespace noix::debug {
 
+/* ---- Thread-safe data transfer structs ---- */
+
+struct FrameData {
+    std::string funcName;
+    std::string filename;
+    int line;
+    int col;
+};
+
+struct ScopeData {
+    std::string name;
+    int scopeLevel;
+    int varStart;
+    int varCount;
+};
+
 /* ---- DAP request handlers ---- */
 
 void DapBridge::handleInitialize(cJSON *args, int requestSeq) {
@@ -72,6 +88,23 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
     running = true;
     firstStop = true;
 
+    /* Re-register debug callbacks (may have been disabled by a previous
+       client disconnect). Must be set before any breakpoints are applied. */
+    if (rt) {
+        enqueueAndWait([this]() {
+            JS_SetDebugCallback(rt, DapBridge::debugCallback, this);
+            JS_SetDebugDrainQueue(rt, DapBridge::drainQueue);
+        });
+    }
+
+    /* Pre-warm source map cache for all loaded scripts so that
+       setBreakpoints can resolve TS paths to JS paths. */
+    if (rt) {
+        enqueueAndWait([this]() {
+            warmSourceMapCache();
+        });
+    }
+
     /* In the new architecture, the script is already running (loaded by
        ScriptEngine at startup). The debugger just attaches to observe.
        Do NOT call executeScript() here — it would re-evaluate the script. */
@@ -82,36 +115,25 @@ void DapBridge::handleLaunch(cJSON *args, int requestSeq, const char *commandNam
 void DapBridge::handleDisconnect(int requestSeq) {
     core::Logger::instance().debug("[DAP] handleDisconnect: enter, running={}, rt={}",
                                     running.load(), (void*)rt);
-    running = false;
 
-    /* Resume the script thread if it's paused in a debug callback.
-       Only call JS_DebugContinue if the debugger is actually paused —
-       otherwise the enqueueAndWait would block waiting for the script
-       thread to process the task, adding unnecessary latency. */
-    if (rt && JS_DebugGetState(rt) != 0) {
-        /* Debugger is paused — must resume via enqueueAndWait so the
-           command runs on the script thread through drainQueue. */
-        enqueueAndWait([this]() {
-            JS_DebugContinue(rt);
-        });
-    }
-
-    /* Send response and terminated event before closing the socket.
-       All writes are protected by writeMutex to avoid racing with closeTransport. */
+    /* Send response and terminated event BEFORE closing the socket.
+       The client is still connected at this point and is waiting for
+       the response. If the write fails (client already disconnected),
+       it's harmless — SDL_net returns an error but doesn't crash. */
     sendResponse(requestSeq, "disconnect", true, nullptr, nullptr);
     pushEvent("terminated", cJSON_CreateObject());
 
-    /* Close the client socket under writeMutex to ensure no concurrent writes.
-       Also sets clientDisconnected so tcp_read_byte exits promptly. */
+    /* Close the client socket under socket._writeMutex. This sets
+       _closed so subsequent writeMessage calls return early,
+       and destroys the client socket so the reader thread unblocks. */
     {
-        std::lock_guard<std::mutex> lk(writeMutex);
+        std::lock_guard<std::mutex> lk(socket._writeMutex);
         closeTransport();
     }
 
-    /* Push resume event so game loop un-freezes.
-       Socket is now closed; pushResumeEvent's write will be a no-op (client is null),
-       but the game loop unfreezing is handled by SDL events, not DAP writes. */
-    pushResumeEvent();
+    /* Clean up the debug session: remove breakpoints, resume the
+       script if paused, reset flags. This is idempotent. */
+    onClientDisconnected();
 }
 
 void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
@@ -137,58 +159,55 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
     /* Results array -- filled during script-thread execution or for pending */
     cJSON *result = cJSON_CreateArray();
 
-    /* Check if the client path is a TypeScript source and needs translation */
     std::string clientPath(path ? path : "");
-    std::string resolvedPath = normalizePath(clientPath.c_str());
-    bool isTsSource = clientPath.size() > 3 && clientPath.substr(clientPath.size() - 3) == ".ts";
+    core::Logger::instance().info("[DAP] handleSetBreakpoints: clientPath='{}', numBreakpoints={}",
+                                    clientPath, requestedBps.size());
 
-    /* If it's a .ts file, translate to .js path and line numbers */
-    if (isTsSource) {
-        /* Pre-warm source map cache: resolve .ts → .js path and load the source map.
-           Without this, resolveGeneratedSource finds an empty cache and falls back
-           to simple extension replacement with wrong line numbers. */
-        std::string jsFallback = clientPath.substr(0, clientPath.size() - 3) + ".js";
-        std::string jsAbsPath = normalizePath(jsFallback.c_str());
-        getSourceMap(jsAbsPath);
-
-        int genLine, genCol;
-        std::string jsPath = resolveGeneratedSource(clientPath, 0, genLine, genCol);
-        resolvedPath = normalizePath(jsPath.c_str());
-        /* Translate each breakpoint's line from TS to JS */
-        for (auto &req : requestedBps) {
-            int gl = 0, gc = 0;
-            jsPath = resolveGeneratedSource(clientPath, req.line, gl, gc);
-            req.line = (gl > 0) ? gl : req.line;
-        }
-    }
-
-    /* Normalize the resolved path for comparison with QuickJS scripts */
-    std::string normPath = resolvedPath;
-
-    /* Helper: check if a breakpoint filename matches the resolved path */
-    auto pathMatches = [&](const std::string &bpFilename) -> bool {
-        return normalizePath(bpFilename.c_str()) == normPath;
-    };
-
-    if (rt && running) {
-        /* Runtime exists and script is running -- do everything on the script thread
-           to avoid race conditions and ensure breakpoint line correction works */
+    if (rt) {
+        /* Runtime exists — do everything on the script thread via enqueueAndWait
+           to avoid race conditions. resolveBreakpointPath walks loaded scripts
+           and source maps to find the correct JS file and translate line numbers.
+           Always use resolveBreakpointPath regardless of file extension — it
+           handles both .ts (with source map translation) and .js (matching
+           against loaded scripts with normalized paths). */
         enqueueAndWait([&]() {
-            /* Resolve client path to QuickJS internal filename */
-            std::string resolvedPath(path);
-            JSDebugScriptInfo *scripts = nullptr;
-            int scriptCount = JS_DebugGetLoadedScripts(rt, &scripts);
-            for (int si = 0; si < scriptCount; si++) {
-                if (normalizePath(scripts[si].filename) == normPath) {
-                    resolvedPath = scripts[si].filename;
-                    break;
+            std::string resolvedPath;
+            bool resolved = false;
+
+            /* Try source-map-aware resolution for all source types.
+               For .ts/.tsx files this translates to the correct JS file + line.
+               For .js files it verifies the file is loaded in QuickJS. */
+            for (auto &req : requestedBps) {
+                int jsLine;
+                std::string jsFile = resolveBreakpointPath(clientPath, req.line, jsLine);
+                core::Logger::instance().info("[DAP] resolveBreakpointPath: tsPath='{}' tsLine={} → jsFile='{}' jsLine={}",
+                                                clientPath, req.originalLine, jsFile, jsLine);
+                if (!resolvedPath.empty() || jsFile != clientPath || jsLine != req.line) {
+                    /* resolveBreakpointPath found a mapping */
+                    resolved = true;
                 }
+                req.line = jsLine;
+                if (resolvedPath.empty()) resolvedPath = jsFile;
             }
-            if (scripts) JS_DebugFreeScriptInfo(rt, scripts, scriptCount);
+
+            if (!resolved) {
+                /* Fallback: match normalized path against QuickJS loaded scripts */
+                resolvedPath = normalizePath(clientPath.c_str());
+                JSDebugScriptInfo *scripts = nullptr;
+                int scriptCount = JS_DebugGetLoadedScripts(rt, &scripts);
+                for (int si = 0; si < scriptCount; si++) {
+                    if (normalizePath(scripts[si].filename) == resolvedPath) {
+                        resolvedPath = scripts[si].filename;
+                        break;
+                    }
+                }
+                if (scripts) JS_DebugFreeScriptInfo(rt, scripts, scriptCount);
+            }
 
             /* Remove existing breakpoints for this file */
+            std::string normResolved = normalizePath(resolvedPath.c_str());
             for (auto it = breakpoints.begin(); it != breakpoints.end(); ) {
-                if (pathMatches(it->filename)) {
+                if (normalizePath(it->filename.c_str()) == normResolved) {
                     JS_DebugRemoveBreakpoint(rt, it->id);
                     it = breakpoints.erase(it);
                 } else {
@@ -199,12 +218,15 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
             /* Set new breakpoints */
             for (auto &req : requestedBps) {
                 uint32_t id;
+                core::Logger::instance().info("[DAP] setBreakpoint: file='{}' line={} condition='{}'",
+                                                resolvedPath, req.line, req.condition);
                 if (!req.condition.empty()) {
-                    id = JS_DebugSetConditionalBreakpoint(rt, resolvedPath.c_str(), req.line, req.condition.c_str());
+                    id = JS_DebugSetConditionalBreakpoint(rt, resolvedPath.c_str(),
+                                                           req.line, req.condition.c_str());
                 } else {
                     id = JS_DebugSetBreakpoint(rt, resolvedPath.c_str(), req.line);
                 }
-
+                core::Logger::instance().info("[DAP] setBreakpoint: result id={}", id);
                 if (id > 0) {
                     Breakpoint b;
                     b.id = id;
@@ -227,74 +249,33 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
                 }
             }
         });
-    } else if (rt) {
-        /* Runtime exists but not running -- set directly on current thread */
-        /* Resolve client path to QuickJS internal filename */
-        JSDebugScriptInfo *scripts = nullptr;
-        int scriptCount = JS_DebugGetLoadedScripts(rt, &scripts);
-        std::string resolvedPath(path);
-        for (int si = 0; si < scriptCount; si++) {
-            if (normalizePath(scripts[si].filename) == normPath) {
-                resolvedPath = scripts[si].filename;
-                break;
-            }
-        }
-        if (scripts) JS_DebugFreeScriptInfo(rt, scripts, scriptCount);
-
-        for (auto it = breakpoints.begin(); it != breakpoints.end(); ) {
-            if (pathMatches(it->filename)) {
-                JS_DebugRemoveBreakpoint(rt, it->id);
-                it = breakpoints.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        for (auto &req : requestedBps) {
-            uint32_t id;
-            if (!req.condition.empty()) {
-                id = JS_DebugSetConditionalBreakpoint(rt, resolvedPath.c_str(), req.line, req.condition.c_str());
-            } else {
-                id = JS_DebugSetBreakpoint(rt, resolvedPath.c_str(), req.line);
-            }
-            if (id > 0) {
-                Breakpoint b;
-                b.id = id;
-                b.filename = resolvedPath;
-                b.line = req.line;
-                b.condition = req.condition;
-                b.verified = true;
-                breakpoints.push_back(b);
-
-                cJSON *r = cJSON_CreateObject();
-                cJSON_AddBoolToObject(r, "verified", true);
-                cJSON_AddNumberToObject(r, "id", id);
-                cJSON_AddNumberToObject(r, "line", req.originalLine);
-                cJSON_AddItemToArray(result, r);
-            } else {
-                cJSON *r = cJSON_CreateObject();
-                cJSON_AddBoolToObject(r, "verified", false);
-                cJSON_AddNumberToObject(r, "line", req.originalLine);
-                cJSON_AddItemToArray(result, r);
-            }
-        }
     } else {
-        /* No runtime yet -- save as pending */
+        /* No runtime yet -- save as pending.
+           Best-effort: replace .ts/.tsx extension with .js for pending breakpoints.
+           Will be re-resolved via resolveBreakpointPath when the runtime is available. */
+        std::string resolvedPath = normalizePath(clientPath.c_str());
+        if (resolvedPath.size() > 4 && resolvedPath.substr(resolvedPath.size() - 4) == ".tsx") {
+            resolvedPath = resolvedPath.substr(0, resolvedPath.size() - 4) + ".js";
+        } else if (resolvedPath.size() > 3 && resolvedPath.substr(resolvedPath.size() - 3) == ".ts") {
+            resolvedPath = resolvedPath.substr(0, resolvedPath.size() - 3) + ".js";
+        }
+
         for (auto it = breakpoints.begin(); it != breakpoints.end(); ) {
-            if (pathMatches(it->filename))
+            if (normalizePath(it->filename.c_str()) == resolvedPath)
                 it = breakpoints.erase(it);
             else
                 ++it;
         }
         for (auto it = pendingBreakpoints.begin(); it != pendingBreakpoints.end(); ) {
-            if (pathMatches(it->filename))
+            if (normalizePath(it->filename.c_str()) == resolvedPath)
                 it = pendingBreakpoints.erase(it);
             else
                 ++it;
         }
         for (auto &req : requestedBps) {
             PendingBreakpoint pb;
-            pb.filename = resolvedPath; /* store JS path for QuickJS */
-            pb.line = req.line;         /* JS line number for QuickJS */
+            pb.filename = resolvedPath;
+            pb.line = req.line;
             pb.condition = req.condition;
             pendingBreakpoints.push_back(pb);
 
@@ -403,11 +384,23 @@ void DapBridge::handleStackTrace(cJSON *args, int requestSeq) {
     int startFrame = json_get_int(args, "startFrame", 0);
     int levels = json_get_int(args, "levels", 0);
 
-    JSDebugFrameInfo *frames = nullptr;
     int count = 0;
+    std::vector<FrameData> frameData;
 
+    /* Capture stack and copy data on the script thread, free inside the same block */
     enqueueAndWait([&]() {
+        JSDebugFrameInfo *frames = nullptr;
         count = JS_DebugCaptureStack(rt, &frames);
+        if (count > 0 && frames) {
+            frameData.resize(count);
+            for (int i = 0; i < count; i++) {
+                frameData[i].funcName = frames[i].func_name ? frames[i].func_name : "";
+                frameData[i].filename = frames[i].filename ? frames[i].filename : "";
+                frameData[i].line = frames[i].line;
+                frameData[i].col = frames[i].col;
+            }
+            JS_DebugFreeFrameInfo(rt, frames, count);
+        }
     });
 
     if (levels <= 0) levels = count - startFrame;
@@ -418,13 +411,15 @@ void DapBridge::handleStackTrace(cJSON *args, int requestSeq) {
     for (int i = startFrame; i < endFrame; i++) {
         cJSON *f = cJSON_CreateObject();
         cJSON_AddNumberToObject(f, "id", i);
-        cJSON_AddStringToObject(f, "name", frames[i].func_name ? frames[i].func_name : "<anonymous>");
+        cJSON_AddStringToObject(f, "name",
+            frameData[i].funcName.empty() ? "<anonymous>" : frameData[i].funcName.c_str());
         cJSON *src = cJSON_CreateObject();
-        const char *fname = frames[i].filename ? frames[i].filename : "<unknown>";
 
         /* Try to translate JS path/line to original (TS) via source map */
         int origLine, origCol;
-        std::string displayPath = resolveOriginalSource(fname, frames[i].line, origLine, origCol);
+        std::string displayPath = resolveOriginalSource(frameData[i].filename,
+                                                          frameData[i].line,
+                                                          origLine, origCol);
 
         cJSON_AddStringToObject(src, "name", displayPath.c_str());
         cJSON_AddStringToObject(src, "path", displayPath.c_str());
@@ -445,8 +440,6 @@ void DapBridge::handleStackTrace(cJSON *args, int requestSeq) {
         cJSON_AddItemToArray(stackFrames, f);
     }
 
-    if (frames) JS_DebugFreeFrameInfo(rt, frames, count);
-
     cJSON *body = cJSON_CreateObject();
     cJSON_AddItemToObject(body, "stackFrames", stackFrames);
     cJSON_AddNumberToObject(body, "totalFrames", count);
@@ -456,11 +449,22 @@ void DapBridge::handleStackTrace(cJSON *args, int requestSeq) {
 void DapBridge::handleScopes(cJSON *args, int requestSeq) {
     int frameId = json_get_int(args, "frameId", 0);
 
-    JSDebugScopeInfo *scopes = nullptr;
-    int scopeCount = 0;
+    std::vector<ScopeData> scopeData;
 
+    /* Capture scopes and copy data on the script thread, free inside the same block */
     enqueueAndWait([&]() {
-        scopeCount = JS_DebugGetFrameScopes(rt, frameId, &scopes);
+        JSDebugScopeInfo *scopes = nullptr;
+        int scopeCount = JS_DebugGetFrameScopes(rt, frameId, &scopes);
+        if (scopeCount > 0 && scopes) {
+            scopeData.resize(scopeCount);
+            for (int i = 0; i < scopeCount; i++) {
+                scopeData[i].name = scopes[i].name ? scopes[i].name : "";
+                scopeData[i].scopeLevel = scopes[i].scope_level;
+                scopeData[i].varStart = scopes[i].var_start;
+                scopeData[i].varCount = scopes[i].var_count;
+            }
+            JS_DebugFreeScopeInfo(rt, scopes, scopeCount);
+        }
     });
 
     cJSON *scopesArr = cJSON_CreateArray();
@@ -471,17 +475,17 @@ void DapBridge::handleScopes(cJSON *args, int requestSeq) {
     bool hasLocal = false, hasClosure = false, hasGlobal = false;
     int localVarCount = 0, closureVarCount = 0;
 
-    for (int i = 0; i < scopeCount; i++) {
-        if (scopes[i].scope_level == -1) {
+    for (const auto &sd : scopeData) {
+        if (sd.scopeLevel == -1) {
             hasGlobal = true;
         } else {
-            const char *cat = scopes[i].name ? scopes[i].name : "Local";
+            const char *cat = sd.name.empty() ? "Local" : sd.name.c_str();
             if (strcmp(cat, "Closure") == 0) {
                 hasClosure = true;
-                closureVarCount += scopes[i].var_count;
+                closureVarCount += sd.varCount;
             } else {
                 hasLocal = true;
-                localVarCount += scopes[i].var_count;
+                localVarCount += sd.varCount;
             }
         }
     }
@@ -515,8 +519,6 @@ void DapBridge::handleScopes(cJSON *args, int requestSeq) {
         cJSON_AddStringToObject(s, "presentationHint", "globals");
         cJSON_AddItemToArray(scopesArr, s);
     }
-
-    if (scopes) JS_DebugFreeScopeInfo(rt, scopes, scopeCount);
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddItemToObject(body, "scopes", scopesArr);
@@ -664,8 +666,7 @@ void DapBridge::handleVariables(cJSON *args, int requestSeq) {
     /* SCOPE_REF_LOCAL: return ALL frame locals for this frame.
        QuickJS's per-scope var_start/var_count tracking is unreliable,
        so for Local scopes we just return the full flat variable list
-       from JS_DebugGetFrameLocals. This ensures all local variables
-       are visible even when the scope partitioning is incorrect.
+       from JS_DebugGetFrameLocals.
 
        IMPORTANT: All QuickJS API calls (including formatJSValue which
        calls JS_IsObject, JS_DupValue etc.) must run inside enqueueAndWait
@@ -845,19 +846,26 @@ void DapBridge::handleSource(cJSON *args, int requestSeq) {
 }
 
 void DapBridge::handleLoadedSources(int requestSeq) {
-    JSDebugScriptInfo *scripts = nullptr;
-    int count = 0;
+    std::vector<std::string> scriptFilenames;
 
+    /* Capture script filenames on the script thread, free inside the same block */
     if (rt) {
         enqueueAndWait([&]() {
-            count = JS_DebugGetLoadedScripts(rt, &scripts);
+            JSDebugScriptInfo *scripts = nullptr;
+            int count = JS_DebugGetLoadedScripts(rt, &scripts);
+            if (count > 0 && scripts) {
+                scriptFilenames.resize(count);
+                for (int i = 0; i < count; i++) {
+                    scriptFilenames[i] = scripts[i].filename ? scripts[i].filename : "";
+                }
+                JS_DebugFreeScriptInfo(rt, scripts, count);
+            }
         });
     }
 
     cJSON *sources = cJSON_CreateArray();
-    for (int i = 0; i < count; i++) {
-        const char *fname = scripts[i].filename;
-        std::string absPath = toAbsolutePath(fname);
+    for (const auto &fname : scriptFilenames) {
+        std::string absPath = toAbsolutePath(fname.c_str());
 
         /* Report the original (TS) source if a source map exists */
         int origLine, origCol;
@@ -879,8 +887,6 @@ void DapBridge::handleLoadedSources(int requestSeq) {
 
         cJSON_AddItemToArray(sources, s);
     }
-
-    if (scripts) JS_DebugFreeScriptInfo(rt, scripts, count);
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddItemToObject(body, "sources", sources);
@@ -912,6 +918,15 @@ void DapBridge::dispatchRequest(cJSON *msg) {
     } else if (strcmp(command, "configurationDone") == 0) {
         configDone = true;
         sendResponse(requestSeq, "configurationDone", true, nullptr, nullptr);
+
+        /* Warm source map cache again in case modules were loaded between
+           handleLaunch and configurationDone. */
+        if (rt) {
+            enqueueAndWait([this]() {
+                warmSourceMapCache();
+            });
+        }
+
         /* If a stopped event was buffered before configurationDone, send it now */
         if (pendingStop.valid) {
             core::Logger::instance().debug("[DAP] configurationDone: sending buffered stopped event");

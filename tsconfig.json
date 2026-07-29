@@ -12,7 +12,8 @@
     "declaration": true,
     "inlineSourceMap": true,
     "paths": {
-      "noix:logger": ["./scripts/noix-modules/logger"]
+      "noix:logger": ["./scripts/noix-modules/logger"],
+      "noix:debug": ["./scripts/noix-modules/debug"]
     }
   },
   "include": ["scripts"]

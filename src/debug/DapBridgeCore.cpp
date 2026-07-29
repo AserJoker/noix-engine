@@ -30,20 +30,12 @@ DapBridge::~DapBridge() {
 
 void DapBridge::closeTransport() {
     /* Close the client socket so the reader thread's blocking read unblocks.
-       Also set clientDisconnected flag so tcp_read_byte exits promptly
-       even if closesocket() doesn't wake up poll() on Windows.
+       DapSocket::closeClient() sets _closed=true first, then destroys
+       the socket — this makes all subsequent I/O return immediately.
 
-       Must hold writeMutex to prevent racing with pushEvent/sendResponse
-       which may write to the socket from other threads. */
-    std::lock_guard<std::mutex> lk(writeMutex);
-    auto *tcp = static_cast<TcpCtx*>(transport.ctx);
-    if (tcp) {
-        tcp->clientDisconnected.store(true);
-        if (tcp->client) {
-            NET_DestroyStreamSocket(tcp->client);
-            tcp->client = nullptr;
-        }
-    }
+       Caller must hold socket.writeMutex (or be in a context where no
+       other thread is writing) to prevent racing with pushEvent/sendResponse. */
+    socket.closeClient();
 }
 
 void DapBridge::resetSession() {
@@ -93,15 +85,76 @@ void DapBridge::resetSession() {
     }
 }
 
+void DapBridge::onClientDisconnected() {
+    /* Called when the DAP client disconnects (either via "disconnect" request
+       or by dropping the TCP connection). In attach mode, the server process
+       must keep running — we only clean up the debug session.
+
+       This method is idempotent — safe to call multiple times. */
+    core::Logger::instance().info("[DAP] onClientDisconnected: cleaning up debug session");
+
+    /* 1. Reset session flags FIRST so debugCallback stops sending events.
+       Setting launched=false prevents debugCallback from pushing freeze events
+       and trying to write to the (now closed) client socket. */
+    bool wasLaunched = launched;
+    launched = false;
+    configDone = false;
+    running = false;
+    stopOnEntry = false;
+    pendingStop.valid = false;
+
+    /* 2. Remove all breakpoints from QuickJS, disable debug callbacks,
+       and resume the script if paused. Only do this once (when this call
+       is the one that transitioned launched from true to false). */
+    if (wasLaunched && rt && _engine && !shuttingDown.load()) {
+        enqueueAndWait([this]() {
+            /* Remove all breakpoints so the script doesn't re-pause */
+            for (auto &bp : breakpoints) {
+                JS_DebugRemoveBreakpoint(rt, bp.id);
+            }
+            breakpoints.clear();
+
+            /* Disable debug callbacks so the script doesn't pause on
+               debugger statements or exception breakpoints either.
+               Will be re-enabled when a new client connects (handleLaunch). */
+            JS_SetDebugCallback(rt, nullptr, nullptr);
+
+            /* Resume the script if it's paused at a breakpoint.
+               After removing breakpoints and disabling callbacks,
+               it won't pause again. */
+            if (JS_DebugGetState(rt) != 0) {
+                core::Logger::instance().info("[DAP] onClientDisconnected: resuming paused script");
+                JS_DebugContinue(rt);
+            }
+        });
+    } else {
+        breakpoints.clear();
+    }
+
+    /* 3. Push resume event so the game loop un-freezes */
+    pushResumeEvent();
+
+    /* 4. Clear pending items — the session is over */
+    pendingBreakpoints.clear();
+    {
+        std::lock_guard<std::mutex> lk(reqMutex);
+        std::queue<std::string> empty;
+        reqQueue.swap(empty);
+    }
+    {
+        std::lock_guard<std::mutex> lk(cmdMutex);
+        std::queue<std::function<void()>> empty;
+        cmdQueue.swap(empty);
+    }
+
+    core::Logger::instance().info("[DAP] onClientDisconnected: done");
+}
+
 /* ---- Core methods ---- */
 
 void DapBridge::setDebugEventTypes(uint32_t freezeType, uint32_t resumeType) {
     _freezeEventType = freezeType;
     _resumeEventType = resumeType;
-}
-
-void DapBridge::setTransport(const DapTransport &t) {
-    transport = t;
 }
 
 void DapBridge::startHandlerThread() {
@@ -128,7 +181,7 @@ void DapBridge::pushEvent(const std::string &eventType, cJSON *body) {
     core::Logger::instance().debug("[DAP] <<< event: {} {}", eventType, json);
     /* Write event immediately -- it may be produced on the script thread
        while the handler thread is blocked waiting for a response. */
-    dap_write_message(transport, writeMutex, json);
+    socket.writeDapMessage(json);
 }
 
 void DapBridge::sendResponse(int requestSeq, const char *command, bool success,
@@ -146,7 +199,7 @@ void DapBridge::sendResponse(int requestSeq, const char *command, bool success,
     cJSON_free(s);
     cJSON_Delete(msg);
     core::Logger::instance().debug("[DAP] <<< response: {}", json);
-    dap_write_message(transport, writeMutex, json);
+    socket.writeDapMessage(json);
 }
 
 void DapBridge::enqueueAndWait(std::function<void()> fn) {
@@ -195,12 +248,17 @@ void DapBridge::enqueueAndWait(std::function<void()> fn) {
     });
 
     /* Wait for the script thread to execute the command.
-       Use a timeout so we periodically check shuttingDown — this prevents
-       deadlock when stopHandlerThread() sets shuttingDown but can only
-       notify reqCv (not this local waitCv). */
+       Use a timeout to avoid permanent blocking. drainQueue processes
+       the cmdQueue even during shutdown, so the command will usually
+       complete. But if the runtime is being destroyed (engine going away),
+       we must give up after a reasonable timeout. */
     std::unique_lock<std::mutex> wl(waitMutex);
-    while (!done && !shuttingDown.load()) {
-        waitCv.wait_for(wl, std::chrono::milliseconds(100));
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!done && std::chrono::steady_clock::now() < deadline) {
+        waitCv.wait_until(wl, deadline);
+    }
+    if (!done) {
+        core::Logger::instance().warn("[DAP] enqueueAndWait: timed out waiting for command execution");
     }
 }
 
@@ -210,15 +268,10 @@ void DapBridge::enqueueAndWait(std::function<void()> fn) {
 void DapBridge::drainQueue(void *opaque) {
     auto *self = static_cast<DapBridge *>(opaque);
 
-    /* If shutting down, resume the script so the script thread can exit.
-       This is the safe way to continue — it runs on the script thread,
-       unlike DapServer::stop() which runs on the main thread. */
-    if (self->shuttingDown.load()) {
-        core::Logger::instance().info("[DAP] drainQueue: shuttingDown detected, calling JS_DebugContinue");
-        if (self->rt) JS_DebugContinue(self->rt);
-        return;
-    }
-
+    /* Always process pending commands first — even during shutdown,
+       because they may contain JS_DebugContinue calls from handleDisconnect.
+       Skipping them would leave stale commands that get re-executed via
+       postTask, causing double JS_DebugContinue. */
     std::function<void()> fn;
     {
         std::lock_guard<std::mutex> lk(self->cmdMutex);
@@ -233,6 +286,16 @@ void DapBridge::drainQueue(void *opaque) {
         fn();
         core::Logger::instance().debug("[DAP] drainQueue: command done, debug_state={}",
                                         self->rt ? JS_DebugGetState(self->rt) : -1);
+        return; /* Command executed — the script may no longer be paused */
+    }
+
+    /* No command in the queue. If shutting down, resume the script
+       so the script thread can exit. This is the safe way to continue —
+       it runs on the script thread, unlike DapServer::stop() which
+       runs on the main thread. */
+    if (self->shuttingDown.load()) {
+        core::Logger::instance().info("[DAP] drainQueue: shuttingDown detected, calling JS_DebugContinue");
+        if (self->rt) JS_DebugContinue(self->rt);
     }
 }
 
@@ -377,49 +440,63 @@ std::string DapBridge::resolveOriginalSource(const std::string &jsPath, int jsLi
     return absPath;
 }
 
-std::string DapBridge::resolveGeneratedSource(const std::string &tsPath, int tsLine,
-                                                int &outGenLine, int &outGenCol) {
-    /* The TS path must be resolved to a JS path. We check all cached source maps
-       to find one whose originalPath matches the TS path. */
+void DapBridge::warmSourceMapCache() {
+    if (!rt) return;
+    JSDebugScriptInfo *scripts = nullptr;
+    int count = JS_DebugGetLoadedScripts(rt, &scripts);
+    for (int i = 0; i < count; i++) {
+        if (scripts[i].filename) {
+            getSourceMap(normalizePath(scripts[i].filename));
+        }
+    }
+    if (scripts) JS_DebugFreeScriptInfo(rt, scripts, count);
+}
+
+std::string DapBridge::resolveBreakpointPath(const std::string &tsPath, int tsLine,
+                                              int &outJsLine) {
+    if (!rt) {
+        outJsLine = tsLine;
+        return tsPath;
+    }
+
     std::string normTsPath = normalizePath(tsPath.c_str());
+    core::Logger::instance().info("[DAP] resolveBreakpointPath: normTsPath='{}', tsLine={}", normTsPath, tsLine);
 
-    for (auto &[jsPath, smap] : _sourceMapCache) {
+    JSDebugScriptInfo *scripts = nullptr;
+    int count = JS_DebugGetLoadedScripts(rt, &scripts);
+    core::Logger::instance().info("[DAP] resolveBreakpointPath: {} loaded scripts", count);
+
+    for (int i = 0; i < count; i++) {
+        if (!scripts[i].filename) continue;
+        std::string jsPath = normalizePath(scripts[i].filename);
+        SourceMap &smap = getSourceMap(jsPath);
+        core::Logger::instance().info("[DAP] resolveBreakpointPath: checking script '{}' smap.valid={}",
+                                        scripts[i].filename, smap.isValid());
         if (!smap.isValid()) continue;
-        for (int i = 0; i < smap.sourceCount(); i++) {
-            if (smap.sourcePath(i) == normTsPath) {
-                outGenLine = smap.generatedLine(tsLine);
-                outGenCol = smap.generatedColumn(tsLine, 0);
-                return jsPath;
+
+        for (int s = 0; s < smap.sourceCount(); s++) {
+            core::Logger::instance().info("[DAP] resolveBreakpointPath:   source[{}]='{}' vs normTsPath='{}'",
+                                            s, smap.sourcePath(s), normTsPath);
+            if (smap.sourcePath(s) == normTsPath) {
+                int genLine = smap.generatedLine(tsLine);
+                outJsLine = (genLine > 0) ? genLine : tsLine;
+                core::Logger::instance().info("[DAP] resolveBreakpointPath: MATCH! jsFile='{}' jsLine={}",
+                                                scripts[i].filename, outJsLine);
+                std::string result = scripts[i].filename;
+                if (scripts) JS_DebugFreeScriptInfo(rt, scripts, count);
+                return result;
             }
         }
     }
 
-    /* No source map found in cache: try loading one for the corresponding .js file.
-       This handles the attach scenario where executeScript() was not called. */
+    if (scripts) JS_DebugFreeScriptInfo(rt, scripts, count);
+
+    /* No source map match found: fall back to extension replacement */
+    outJsLine = tsLine;
     if (tsPath.size() > 3 && tsPath.substr(tsPath.size() - 3) == ".ts") {
-        std::string jsPath = tsPath.substr(0, tsPath.size() - 3) + ".js";
-        std::string jsAbsPath = normalizePath(jsPath.c_str());
-        SourceMap &smap = getSourceMap(jsAbsPath);
-        if (smap.isValid()) {
-            for (int i = 0; i < smap.sourceCount(); i++) {
-                if (smap.sourcePath(i) == normTsPath) {
-                    outGenLine = smap.generatedLine(tsLine);
-                    outGenCol = smap.generatedColumn(tsLine, 0);
-                    return jsAbsPath;
-                }
-            }
-        }
-        /* Source map exists but doesn't contain this TS path — fall through */
+        return tsPath.substr(0, tsPath.size() - 3) + ".js";
     }
-
-    /* No source map found: try mapping .ts → .js by file extension */
-    std::string jsPath = tsPath;
-    if (jsPath.size() > 3 && jsPath.substr(jsPath.size() - 3) == ".ts") {
-        jsPath = jsPath.substr(0, jsPath.size() - 3) + ".js";
-    }
-    outGenLine = tsLine;
-    outGenCol = 0;
-    return jsPath;
+    return tsPath;
 }
 
 /* ---- Handler thread ---- */

@@ -6,9 +6,7 @@
  * Uses member state instead of globals, and holds a back-pointer to
  * ScriptEngine for game-loop freeze/resume integration.
  *
- * Transport modes:
- *   stdio (default)  —  for VS Code launch mode (DebugAdapterExecutable)
- *   TCP (--port N)   —  for VS Code attach mode (DebugAdapterServer)
+ * Transport: TCP (DapSocket) — for VS Code attach mode (DebugAdapterServer)
  *
  * Thread model:
  *   Reader thread  — reads DAP messages from transport, enqueues requests
@@ -17,10 +15,9 @@
  */
 
 #include "debug/DapObjectRefStore.h"
+#include "debug/DapSocket.h"
 #include "debug/SourceMap.h"
 #include "quickjs.h"
-
-#include <SDL3_net/SDL_net.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -37,27 +34,6 @@ struct cJSON;
 namespace noix::script { class ScriptEngine; }
 
 namespace noix::debug {
-
-/* ---- Transport abstraction for DAP wire protocol ---- */
-
-struct DapTransport {
-    /* Read a single byte. Returns -1 on EOF/error. */
-    int (*readByte)(void *ctx);
-    /* Write a complete DAP message (Content-Length header + JSON body). */
-    void (*writeMessage)(void *ctx, const std::string &msg);
-    void *ctx = nullptr;
-};
-
-/* ---- TCP context for SDL_net-based transport ---- */
-
-struct TcpCtx {
-    NET_Server *server = nullptr;
-    NET_StreamSocket *client = nullptr;
-    std::string recvBuffer;
-    int port = 0;
-    std::atomic<bool> *shuttingDown = nullptr; /* pointer to DapBridge::shuttingDown */
-    std::atomic<bool> clientDisconnected{false}; /* set when client socket is closed */
-};
 
 /* ---- Scope varRef encoding ---- */
 
@@ -83,20 +59,27 @@ public:
     void startHandlerThread();
     void stopHandlerThread();
 
-    /* Transport initialization (called by DapServer) */
-    void setTransport(const DapTransport& transport);
-
     /* Shutdown flag (accessible from transport code) */
     std::atomic<bool> shuttingDown{false};
 
     /* Resume the game loop (used by DapServer::stop to unfreeze on exit) */
     void resumeGameLoop() { pushResumeEvent(); }
 
-    /* Close client socket to unblock the reader thread */
+    /* Close client socket to unblock the reader thread.
+       Must hold socket.writeMutex or be in a context where no other
+       thread is writing (e.g., during shutdown after closing the socket). */
     void closeTransport();
+
+    /* Socket — thread-safe TCP wrapper for DAP transport */
+    DapSocket socket;
 
     /* Reset session state for a new client connection (keeps server socket alive) */
     void resetSession();
+
+    /* Handle client disconnection: resume script if paused, remove breakpoints,
+       reset session state. Safe to call multiple times (idempotent).
+       Called from handleDisconnect (handler thread) and reader thread. */
+    void onClientDisconnected();
 
     /* QuickJS state — set by ScriptEngine after creating runtime */
     JSRuntime *rt = nullptr;
@@ -158,10 +141,6 @@ public:
     };
     PendingStop pendingStop;
 
-    /* Transport */
-    DapTransport transport;
-    std::mutex writeMutex;
-
     /* Handler thread */
     std::thread handlerThread;
 
@@ -215,13 +194,21 @@ public:
     /* Get or parse the SourceMap for a JS file (cached) */
     SourceMap &getSourceMap(const std::string &jsAbsPath);
 
+    /* Pre-warm source map cache for all scripts loaded by QuickJS.
+       Must be called on the script thread (inside enqueueAndWait). */
+    void warmSourceMapCache();
+
     /* Translate QuickJS .js path/line to original TS path/line */
     std::string resolveOriginalSource(const std::string &jsPath, int jsLine,
                                        int &outOrigLine, int &outOrigCol);
 
-    /* Translate TS path/line to QuickJS .js path/line (for breakpoint setting) */
-    std::string resolveGeneratedSource(const std::string &tsPath, int tsLine,
-                                        int &outGenLine, int &outGenCol);
+    /* Resolve a client TS path + line to QuickJS internal JS path + line
+       by walking loaded scripts and their source maps.
+       Must be called on the script thread (inside enqueueAndWait).
+       Returns the resolved JS path; sets outJsLine.
+       If no mapping found, returns tsPath with outJsLine = tsLine. */
+    std::string resolveBreakpointPath(const std::string &tsPath, int tsLine,
+                                      int &outJsLine);
 
     /* Execute the script on the calling (script) thread.
        Called via ScriptEngine::postTask from handleLaunch.
