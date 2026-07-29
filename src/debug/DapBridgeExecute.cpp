@@ -31,6 +31,9 @@ void DapBridge::executeScript() {
     ss << file.rdbuf();
     std::string source = ss.str();
 
+    /* Pre-warm the source map cache for this script */
+    getSourceMap(scriptPath);
+
     /* Set debug callbacks */
     JS_SetDebugCallback(rt, DapBridge::debugCallback, this);
     JS_SetDebugDrainQueue(rt, DapBridge::drainQueue);
@@ -82,14 +85,26 @@ void DapBridge::executeScript() {
         JS_DebugPause(rt);
     }
 
-    /* Fire loadedSource event */
+    /* Fire loadedSource event — report original (TS) path if source map exists */
     {
+        int origLine, origCol;
+        std::string origPath = resolveOriginalSource(scriptPath, 1, origLine, origCol);
+
         cJSON *body = cJSON_CreateObject();
         cJSON_AddStringToObject(body, "reason", "new");
         cJSON *src = cJSON_CreateObject();
-        cJSON_AddStringToObject(src, "name", scriptPath.c_str());
-        cJSON_AddStringToObject(src, "path", scriptPath.c_str());
-        cJSON_AddNumberToObject(src, "sourceReference", 0);
+        cJSON_AddStringToObject(src, "name", origPath.c_str());
+        cJSON_AddStringToObject(src, "path", origPath.c_str());
+
+        std::ifstream testFile(origPath);
+        if (testFile.is_open()) {
+            cJSON_AddNumberToObject(src, "sourceReference", 0);
+        } else {
+            int ref = _nextSourceRef++;
+            _sourceRefPaths[ref] = origPath;
+            cJSON_AddNumberToObject(src, "sourceReference", ref);
+        }
+
         cJSON_AddItemToObject(body, "source", src);
         pushEvent("loadedSource", body);
     }

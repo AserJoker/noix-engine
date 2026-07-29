@@ -3,7 +3,6 @@
 /*
  * DapBridge — DAP debug bridge for QuickJS, integrated with the noix engine.
  *
- * Extracted from DapTestBridge.cpp into a proper class in noix::debug.
  * Uses member state instead of globals, and holds a back-pointer to
  * ScriptEngine for game-loop freeze/resume integration.
  *
@@ -18,6 +17,7 @@
  */
 
 #include "debug/DapObjectRefStore.h"
+#include "debug/SourceMap.h"
 #include "quickjs.h"
 
 #include <SDL3_net/SDL_net.h>
@@ -29,6 +29,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 struct cJSON;
@@ -199,6 +200,28 @@ public:
     ObjectRefStore _objectRefs;
 
     ObjectRefStore &objectRefs() { return _objectRefs; }
+
+    /* ---- SourceMap support ---- */
+
+    /* Cache: JS absolute path → parsed SourceMap */
+    std::unordered_map<std::string, SourceMap> _sourceMapCache;
+
+    /* sourceReference ID counter for original sources not on disk */
+    int _nextSourceRef = 1;
+
+    /* sourceReference → original source absolute path */
+    std::unordered_map<int, std::string> _sourceRefPaths;
+
+    /* Get or parse the SourceMap for a JS file (cached) */
+    SourceMap &getSourceMap(const std::string &jsAbsPath);
+
+    /* Translate QuickJS .js path/line to original TS path/line */
+    std::string resolveOriginalSource(const std::string &jsPath, int jsLine,
+                                       int &outOrigLine, int &outOrigCol);
+
+    /* Translate TS path/line to QuickJS .js path/line (for breakpoint setting) */
+    std::string resolveGeneratedSource(const std::string &tsPath, int tsLine,
+                                        int &outGenLine, int &outGenCol);
 
     /* Execute the script on the calling (script) thread.
        Called via ScriptEngine::postTask from handleLaunch.

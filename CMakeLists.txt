@@ -40,6 +40,7 @@ add_executable(noix-engine
     src/debug/DapObjectRefStore.cpp
     src/debug/DapTransport.cpp
     src/debug/DapBridgeUtils.cpp
+    src/debug/SourceMap.cpp
     src/debug/DapServer.cpp
     src/debug/HttpServer.cpp
     src/resource/ResourcePack.cpp
@@ -63,28 +64,6 @@ target_link_libraries(noix-engine PRIVATE
 )
 
 set_target_properties(noix-engine PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
-)
-
-# ---- DAP Debug Bridge (standalone test binary) ----
-add_executable(dap-debug-bridge
-    src/debug/DapTestBridge.cpp
-)
-
-target_include_directories(dap-debug-bridge PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
-)
-
-target_link_libraries(dap-debug-bridge PRIVATE
-    qjs
-    cjson
-    SDL3::SDL3
-    SDL3_net::SDL3_net
-)
-
-set_target_properties(dap-debug-bridge PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 

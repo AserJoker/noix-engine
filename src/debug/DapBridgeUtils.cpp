@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <algorithm>
 #include <climits>
@@ -178,14 +179,29 @@ JSModuleDef *dap_module_loader(JSContext *ctx, const char *module_name,
     /* Set import.meta */
     dap_set_import_meta(ctx, val, false);
 
-    /* Notify about loaded source */
+    /* Pre-warm source map cache for this module */
+    bridge->getSourceMap(resolved_path);
+
+    /* Notify about loaded source — report original (TS) path if source map exists */
     {
+        int origLine, origCol;
+        std::string origPath = bridge->resolveOriginalSource(resolved_path, 1, origLine, origCol);
+
         cJSON *body = cJSON_CreateObject();
         cJSON_AddStringToObject(body, "reason", "new");
         cJSON *src = cJSON_CreateObject();
-        cJSON_AddStringToObject(src, "name", resolved_path.c_str());
-        cJSON_AddStringToObject(src, "path", resolved_path.c_str());
-        cJSON_AddNumberToObject(src, "sourceReference", 0);
+        cJSON_AddStringToObject(src, "name", origPath.c_str());
+        cJSON_AddStringToObject(src, "path", origPath.c_str());
+
+        std::ifstream testFile(origPath);
+        if (testFile.is_open()) {
+            cJSON_AddNumberToObject(src, "sourceReference", 0);
+        } else {
+            int ref = bridge->_nextSourceRef++;
+            bridge->_sourceRefPaths[ref] = origPath;
+            cJSON_AddNumberToObject(src, "sourceReference", ref);
+        }
+
         cJSON_AddItemToObject(body, "source", src);
         bridge->pushEvent("loadedSource", body);
     }

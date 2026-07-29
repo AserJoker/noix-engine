@@ -61,11 +61,17 @@ void DapServer::stop() {
     core::Logger::instance().info("DapServer::stop: begin");
     _bridge.shuttingDown = true;
 
-    /* If the script thread is paused in a debug callback, resume QuickJS so
-       it can exit the paused loop. Without this, drainQueue() blocks forever
-       on cmdCv and the script thread never checks _running. */
-    if (_bridge.rt) {
-        JS_DebugContinue(_bridge.rt);
+    /* If the script thread is paused in a debug callback, nudge drainQueue
+       so it notices shuttingDown and calls JS_DebugContinue on the script
+       thread. We must NOT call JS_DebugContinue directly here — it must
+       only be called from the script thread. */
+    if (_bridge.rt && JS_DebugGetState(_bridge.rt) != 0) {
+        {
+            std::lock_guard<std::mutex> lk(_bridge.cmdMutex);
+            /* Push a no-op so drainQueue wakes up and checks shuttingDown */
+            _bridge.cmdQueue.push([](){});
+        }
+        _bridge.cmdCv.notify_one();
     }
 
     /* Close client socket to unblock the reader thread's tcp_read_byte */

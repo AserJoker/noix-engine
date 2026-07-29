@@ -84,8 +84,16 @@ void DapBridge::handleDisconnect(int requestSeq) {
                                     running.load(), (void*)rt);
     running = false;
 
-    if (rt) {
-        JS_DebugContinue(rt);
+    /* Resume the script thread if it's paused in a debug callback.
+       Only call JS_DebugContinue if the debugger is actually paused —
+       otherwise the enqueueAndWait would block waiting for the script
+       thread to process the task, adding unnecessary latency. */
+    if (rt && JS_DebugGetState(rt) != 0) {
+        /* Debugger is paused — must resume via enqueueAndWait so the
+           command runs on the script thread through drainQueue. */
+        enqueueAndWait([this]() {
+            JS_DebugContinue(rt);
+        });
     }
 
     /* Send response and terminated event before closing the socket.
@@ -112,7 +120,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
     cJSON *bps = json_get(args, "breakpoints");
 
     /* Collect requested breakpoint lines/conditions before any enqueueAndWait */
-    struct BpReq { int line; std::string condition; };
+    struct BpReq { int line; std::string condition; int originalLine; };
     std::vector<BpReq> requestedBps;
     if (bps && cJSON_IsArray(bps)) {
         int arrSize = cJSON_GetArraySize(bps);
@@ -121,6 +129,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
             BpReq req;
             req.line = json_get_int(bp, "line");
             req.condition = json_get_str(bp, "condition", "");
+            req.originalLine = req.line; /* save original line for response */
             requestedBps.push_back(req);
         }
     }
@@ -128,10 +137,35 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
     /* Results array -- filled during script-thread execution or for pending */
     cJSON *result = cJSON_CreateArray();
 
-    /* Normalize the client-provided path for comparison */
-    std::string normPath = normalizePath(path);
+    /* Check if the client path is a TypeScript source and needs translation */
+    std::string clientPath(path ? path : "");
+    std::string resolvedPath = normalizePath(clientPath.c_str());
+    bool isTsSource = clientPath.size() > 3 && clientPath.substr(clientPath.size() - 3) == ".ts";
 
-    /* Helper: check if a breakpoint filename matches the client path */
+    /* If it's a .ts file, translate to .js path and line numbers */
+    if (isTsSource) {
+        /* Pre-warm source map cache: resolve .ts → .js path and load the source map.
+           Without this, resolveGeneratedSource finds an empty cache and falls back
+           to simple extension replacement with wrong line numbers. */
+        std::string jsFallback = clientPath.substr(0, clientPath.size() - 3) + ".js";
+        std::string jsAbsPath = normalizePath(jsFallback.c_str());
+        getSourceMap(jsAbsPath);
+
+        int genLine, genCol;
+        std::string jsPath = resolveGeneratedSource(clientPath, 0, genLine, genCol);
+        resolvedPath = normalizePath(jsPath.c_str());
+        /* Translate each breakpoint's line from TS to JS */
+        for (auto &req : requestedBps) {
+            int gl = 0, gc = 0;
+            jsPath = resolveGeneratedSource(clientPath, req.line, gl, gc);
+            req.line = (gl > 0) ? gl : req.line;
+        }
+    }
+
+    /* Normalize the resolved path for comparison with QuickJS scripts */
+    std::string normPath = resolvedPath;
+
+    /* Helper: check if a breakpoint filename matches the resolved path */
     auto pathMatches = [&](const std::string &bpFilename) -> bool {
         return normalizePath(bpFilename.c_str()) == normPath;
     };
@@ -183,12 +217,12 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
                     cJSON *r = cJSON_CreateObject();
                     cJSON_AddBoolToObject(r, "verified", true);
                     cJSON_AddNumberToObject(r, "id", id);
-                    cJSON_AddNumberToObject(r, "line", req.line);
+                    cJSON_AddNumberToObject(r, "line", req.originalLine);
                     cJSON_AddItemToArray(result, r);
                 } else {
                     cJSON *r = cJSON_CreateObject();
                     cJSON_AddBoolToObject(r, "verified", false);
-                    cJSON_AddNumberToObject(r, "line", req.line);
+                    cJSON_AddNumberToObject(r, "line", req.originalLine);
                     cJSON_AddItemToArray(result, r);
                 }
             }
@@ -234,12 +268,12 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
                 cJSON *r = cJSON_CreateObject();
                 cJSON_AddBoolToObject(r, "verified", true);
                 cJSON_AddNumberToObject(r, "id", id);
-                cJSON_AddNumberToObject(r, "line", req.line);
+                cJSON_AddNumberToObject(r, "line", req.originalLine);
                 cJSON_AddItemToArray(result, r);
             } else {
                 cJSON *r = cJSON_CreateObject();
                 cJSON_AddBoolToObject(r, "verified", false);
-                cJSON_AddNumberToObject(r, "line", req.line);
+                cJSON_AddNumberToObject(r, "line", req.originalLine);
                 cJSON_AddItemToArray(result, r);
             }
         }
@@ -259,14 +293,14 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
         }
         for (auto &req : requestedBps) {
             PendingBreakpoint pb;
-            pb.filename = path;
-            pb.line = req.line;
+            pb.filename = resolvedPath; /* store JS path for QuickJS */
+            pb.line = req.line;         /* JS line number for QuickJS */
             pb.condition = req.condition;
             pendingBreakpoints.push_back(pb);
 
             cJSON *r = cJSON_CreateObject();
             cJSON_AddBoolToObject(r, "verified", true);
-            cJSON_AddNumberToObject(r, "line", req.line);
+            cJSON_AddNumberToObject(r, "line", req.originalLine);
             cJSON_AddItemToArray(result, r);
         }
     }
@@ -387,12 +421,27 @@ void DapBridge::handleStackTrace(cJSON *args, int requestSeq) {
         cJSON_AddStringToObject(f, "name", frames[i].func_name ? frames[i].func_name : "<anonymous>");
         cJSON *src = cJSON_CreateObject();
         const char *fname = frames[i].filename ? frames[i].filename : "<unknown>";
-        cJSON_AddStringToObject(src, "name", fname);
-        cJSON_AddStringToObject(src, "path", toAbsolutePath(fname));
-        cJSON_AddNumberToObject(src, "sourceReference", 0);
+
+        /* Try to translate JS path/line to original (TS) via source map */
+        int origLine, origCol;
+        std::string displayPath = resolveOriginalSource(fname, frames[i].line, origLine, origCol);
+
+        cJSON_AddStringToObject(src, "name", displayPath.c_str());
+        cJSON_AddStringToObject(src, "path", displayPath.c_str());
+
+        /* If the original source is not on disk, assign a sourceReference */
+        std::ifstream testFile(displayPath);
+        if (testFile.is_open()) {
+            cJSON_AddNumberToObject(src, "sourceReference", 0);
+        } else {
+            int ref = _nextSourceRef++;
+            _sourceRefPaths[ref] = displayPath;
+            cJSON_AddNumberToObject(src, "sourceReference", ref);
+        }
+
         cJSON_AddItemToObject(f, "source", src);
-        cJSON_AddNumberToObject(f, "line", frames[i].line);
-        cJSON_AddNumberToObject(f, "column", frames[i].col);
+        cJSON_AddNumberToObject(f, "line", origLine);
+        cJSON_AddNumberToObject(f, "column", origCol);
         cJSON_AddItemToArray(stackFrames, f);
     }
 
@@ -654,27 +703,84 @@ void DapBridge::handleEvaluate(cJSON *args, int requestSeq) {
 
     JSValue result = JS_UNDEFINED;
     bool success = false;
+    std::string errorStr;
+    std::string resultStr;
+    std::string resultType;
+    int varRef = 0;
 
+    /* All QuickJS API calls must run on the script thread via enqueueAndWait.
+       Capture the formatted result as strings so no JSValue escapes the block. */
     enqueueAndWait([&]() {
         result = JS_DebugEvaluateOnFrameScoped(rt, frameId, expr);
         success = !JS_IsException(result);
+
+        if (success) {
+            if (JS_IsNumber(result)) {
+                double d;
+                JS_ToFloat64(ctx, &d, result);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%g", d);
+                resultStr = buf;
+                resultType = "number";
+            } else if (JS_IsBool(result)) {
+                resultStr = JS_ToBool(ctx, result) ? "true" : "false";
+                resultType = "boolean";
+            } else if (JS_IsString(result)) {
+                const char *s = JS_ToCString(ctx, result);
+                resultStr = s ? s : "";
+                JS_FreeCString(ctx, s);
+                resultType = "string";
+            } else if (JS_IsNull(result)) {
+                resultStr = "null";
+                resultType = "null";
+            } else if (JS_IsUndefined(result)) {
+                resultStr = "undefined";
+                resultType = "undefined";
+            } else if (JS_IsObject(result)) {
+                if (JS_IsArray(result)) {
+                    JSAtom lengthAtom = JS_NewAtom(ctx, "length");
+                    JSValue lenVal = JS_GetProperty(ctx, result, lengthAtom);
+                    uint32_t len = 0;
+                    if (JS_IsNumber(lenVal)) {
+                        int32_t i32;
+                        if (JS_ToInt32(ctx, &i32, lenVal) == 0)
+                            len = (uint32_t)i32;
+                    }
+                    JS_FreeValue(ctx, lenVal);
+                    JS_FreeAtom(ctx, lengthAtom);
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "Array(%u)", len);
+                    resultStr = buf;
+                    resultType = "object";
+                } else if (JS_IsFunction(ctx, result)) {
+                    resultStr = "function";
+                    resultType = "function";
+                } else {
+                    resultStr = "Object";
+                    resultType = "object";
+                }
+                varRef = _objectRefs.add(JS_DupValue(ctx, result));
+            }
+        } else {
+            JSValue exc = JS_GetException(ctx);
+            const char *str = JS_ToCString(ctx, exc);
+            errorStr = str ? str : "Error";
+            JS_FreeCString(ctx, str);
+            JS_FreeValue(ctx, exc);
+        }
+        JS_FreeValue(ctx, result);
     });
 
     cJSON *body = cJSON_CreateObject();
     if (success) {
-        formatJSValue(ctx, _objectRefs, body, result, "result");
-        if (!JS_IsObject(result)) {
-            cJSON_AddNumberToObject(body, "variablesReference", 0);
+        cJSON_AddStringToObject(body, "result", resultStr.c_str());
+        if (!resultType.empty()) {
+            cJSON_AddStringToObject(body, "type", resultType.c_str());
         }
-        /* objects already have variablesReference set by formatJSValue */
+        cJSON_AddNumberToObject(body, "variablesReference", varRef);
     } else {
-        JSValue exc = JS_GetException(ctx);
-        const char *str = JS_ToCString(ctx, exc);
-        cJSON_AddStringToObject(body, "result", str ? str : "Error");
-        JS_FreeCString(ctx, str);
-        JS_FreeValue(ctx, exc);
+        cJSON_AddStringToObject(body, "result", errorStr.c_str());
     }
-    JS_FreeValue(ctx, result);
 
     sendResponse(requestSeq, "evaluate", success, nullptr, body);
 }
@@ -692,6 +798,29 @@ void DapBridge::handleThreads(int requestSeq) {
 
 void DapBridge::handleSource(cJSON *args, int requestSeq) {
     cJSON *srcArg = json_get(args, "source");
+    int sourceRef = json_get_int(args, "sourceReference", 0);
+
+    /* If sourceReference > 0, look up the path from our cache */
+    if (sourceRef > 0) {
+        auto it = _sourceRefPaths.find(sourceRef);
+        if (it == _sourceRefPaths.end()) {
+            sendResponse(requestSeq, "source", false, "unknown source reference", nullptr);
+            return;
+        }
+        std::ifstream file(it->second);
+        if (!file.is_open()) {
+            sendResponse(requestSeq, "source", false, "cannot open file", nullptr);
+            return;
+        }
+        std::stringstream ss;
+        ss << file.rdbuf();
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddStringToObject(body, "content", ss.str().c_str());
+        cJSON_AddStringToObject(body, "mimeType", "text/javascript");
+        sendResponse(requestSeq, "source", true, nullptr, body);
+        return;
+    }
+
     const char *path = json_get_str(srcArg, "path");
 
     if (!path || !path[0]) {
@@ -727,10 +856,27 @@ void DapBridge::handleLoadedSources(int requestSeq) {
 
     cJSON *sources = cJSON_CreateArray();
     for (int i = 0; i < count; i++) {
+        const char *fname = scripts[i].filename;
+        std::string absPath = toAbsolutePath(fname);
+
+        /* Report the original (TS) source if a source map exists */
+        int origLine, origCol;
+        std::string origPath = resolveOriginalSource(fname, 1, origLine, origCol);
+
         cJSON *s = cJSON_CreateObject();
-        cJSON_AddStringToObject(s, "name", scripts[i].filename);
-        cJSON_AddStringToObject(s, "path", toAbsolutePath(scripts[i].filename));
-        cJSON_AddNumberToObject(s, "sourceReference", 0);
+        cJSON_AddStringToObject(s, "name", origPath.c_str());
+        cJSON_AddStringToObject(s, "path", origPath.c_str());
+
+        /* If original source is on disk, sourceReference = 0; otherwise assign one */
+        std::ifstream testFile(origPath);
+        if (testFile.is_open()) {
+            cJSON_AddNumberToObject(s, "sourceReference", 0);
+        } else {
+            int ref = _nextSourceRef++;
+            _sourceRefPaths[ref] = origPath;
+            cJSON_AddNumberToObject(s, "sourceReference", ref);
+        }
+
         cJSON_AddItemToArray(sources, s);
     }
 

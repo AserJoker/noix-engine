@@ -40,9 +40,11 @@ static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* 
     fread(buf.data(), 1, len, f);
     fclose(f);
 
-    /* Compile and instantiate the module */
-    JSValue func = JS_Eval(ctx, buf.c_str(), buf.size(), module_name,
-                           JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    /* Compile and instantiate the module.
+       Only add JS_EVAL_FLAG_DEBUG_INFO when DAP bridge is present. */
+    int evalFlags = JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY;
+    if (engine->dapBridge()) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
+    JSValue func = JS_Eval(ctx, buf.c_str(), buf.size(), module_name, evalFlags);
     if (JS_IsException(func)) {
         return nullptr;
     }
@@ -74,11 +76,13 @@ void ScriptEngine::start() {
 
 void ScriptEngine::stop() {
     if (!_running.load()) return;
+    core::Logger::instance().info("ScriptEngine::stop: begin");
     _running.store(false);
     {
         std::lock_guard lock(_queueMutex);
         _queueCv.notify_one();
     }
+    core::Logger::instance().info("ScriptEngine::stop: joining script thread...");
     if (_thread.joinable()) {
         _thread.join();
     }
@@ -192,8 +196,13 @@ bool ScriptEngine::loadScript(const std::string& path) {
     fread(buf.data(), 1, len, f);
     fclose(f);
 
-    JSValue result = JS_Eval(_ctx, buf.c_str(), buf.size(), path.c_str(),
-                              JS_EVAL_TYPE_MODULE);
+    /* Only enable debug info when DAP bridge is present. Without DAP,
+       JS_EVAL_FLAG_DEBUG_INFO can cause the script to pause on debugger
+       statements with no way to resume — leading to a deadlock. */
+    int evalFlags = JS_EVAL_TYPE_MODULE;
+    if (_dapBridge) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
+
+    JSValue result = JS_Eval(_ctx, buf.c_str(), buf.size(), path.c_str(), evalFlags);
     if (JS_IsException(result)) {
         JSValue exc = JS_GetException(_ctx);
         const char* msg = JS_ToCString(_ctx, exc);

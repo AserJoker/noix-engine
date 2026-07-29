@@ -41,6 +41,11 @@
               "remoteRoot": {
                 "type": "string",
                 "description": "Remote source root path for remote debugging"
+              },
+              "sourceMap": {
+                "type": "boolean",
+                "default": true,
+                "description": "Enable source map support for TypeScript debugging"
               }
             }
           }
