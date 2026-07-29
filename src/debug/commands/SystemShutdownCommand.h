@@ -1,6 +1,7 @@
 #pragma once
 
 #include "debug/Command.h"
+#include "core/Value.h"
 
 namespace noix::debug {
 
@@ -17,24 +18,24 @@ public:
     }
 
     Value responseSchema() const override {
-        return Value::object({
-            {"type", Value("object")},
-            {"properties", Value::object({
-                {"status", Value::object({{"type", Value("string")}, {"enum", Value::array({Value("shutting-down"), Value("already-shutting-down")})}})}
-            })}
-        });
+        return R"({
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["shutting-down", "already-shutting-down"]}
+            }
+        })"_json;
     }
 
     Value execute(const Value& /*request*/) override {
         if (_shutdownRequested.exchange(true)) {
-            return Value::object({{"status", Value("already-shutting-down")}});
+            return R"({"status": "already-shutting-down"})"_json;
         }
 
         if (_shutdownCallback) {
             _shutdownCallback();
         }
 
-        return Value::object({{"status", Value("shutting-down")}});
+        return R"({"status": "shutting-down"})"_json;
     }
 
 private:

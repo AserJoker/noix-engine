@@ -1,5 +1,6 @@
 #include "debug/HttpServer.h"
 #include "core/Logger.h"
+#include "core/Value.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
@@ -118,9 +119,9 @@ void HttpServer::serverLoop() {
         if (gotRequest && method == "POST") {
             result = handleRequest(path, body);
         } else if (gotRequest) {
-            result = {405, Value::object({{"error", Value("method not allowed")}}).dump()};
+            result = {405, R"({"error": "method not allowed"})"_json.dump()};
         } else {
-            result = {400, Value::object({{"error", Value("bad request")}}).dump()};
+            result = {400, R"({"error": "bad request"})"_json.dump()};
         }
 
         /* Send response */

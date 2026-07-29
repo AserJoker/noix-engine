@@ -2,6 +2,7 @@
 
 #include "debug/Command.h"
 #include "debug/HttpServer.h"
+#include "core/Value.h"
 
 namespace noix::debug {
 
@@ -21,28 +22,28 @@ public:
     }
 
     Value responseSchema() const override {
-        return Value::object({
-            {"type", Value("object")},
-            {"properties", Value::object({
-                {"name", Value::object({{"type", Value("string")}})},
-                {"version", Value::object({{"type", Value("string")}})},
-                {"api", Value::object({
-                    {"type", Value("object")},
-                    {"properties", Value::object({
-                        {"v1", Value::object({{"type", Value("array")}, {"items", Value::object({{"type", Value("string")}})}})}
-                    })}
-                })},
-                {"dap", Value::object({
-                    {"type", Value("object")},
-                    {"properties", Value::object({
-                        {"available", Value::object({{"type", Value("boolean")}})},
-                        {"transport", Value::object({{"type", Value("string")}, {"enum", Value::array({Value("tcp"), Value("stdio"), Value("none")})}})},
-                        {"host", Value::object({{"type", Value("string")}})},
-                        {"port", Value::object({{"type", Value("integer")}})}
-                    })}
-                })}
-            })}
-        });
+        return R"({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "version": {"type": "string"},
+                "api": {
+                    "type": "object",
+                    "properties": {
+                        "v1": {"type": "array", "items": {"type": "string"}}
+                    }
+                },
+                "dap": {
+                    "type": "object",
+                    "properties": {
+                        "available": {"type": "boolean"},
+                        "transport": {"type": "string", "enum": ["tcp", "stdio", "none"]},
+                        "host": {"type": "string"},
+                        "port": {"type": "integer"}
+                    }
+                }
+            }
+        })"_json;
     }
 
     Value execute(const Value& /*request*/) override {
@@ -61,22 +62,22 @@ public:
 
         Value dapObj;
         if (_dapTransport == DapTransportMode::Tcp) {
-            dapObj = Value::object({
-                {"available", Value(true)},
-                {"transport", Value("tcp")},
-                {"host", Value("127.0.0.1")},
-                {"port", Value(static_cast<int>(_dapPort))}
-            });
+            dapObj = R"({
+                "available": true,
+                "transport": "tcp",
+                "host": "127.0.0.1"
+            })"_json;
+            dapObj.asObject().emplace("port", Value(static_cast<int>(_dapPort)));
         } else if (_dapTransport == DapTransportMode::Stdio) {
-            dapObj = Value::object({
-                {"available", Value(true)},
-                {"transport", Value("stdio")}
-            });
+            dapObj = R"({
+                "available": true,
+                "transport": "stdio"
+            })"_json;
         } else {
-            dapObj = Value::object({
-                {"available", Value(false)},
-                {"transport", Value("none")}
-            });
+            dapObj = R"({
+                "available": false,
+                "transport": "none"
+            })"_json;
         }
 
         return Value::object({

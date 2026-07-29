@@ -2,6 +2,7 @@
 
 #include "debug/Command.h"
 #include "debug/HttpServer.h"
+#include "core/Value.h"
 
 namespace noix::debug {
 
@@ -13,33 +14,33 @@ public:
     std::string description() const override { return "Query JSON Schema for an API endpoint"; }
 
     Value requestSchema() const override {
-        return Value::object({
-            {"type", Value("object")},
-            {"properties", Value::object({
-                {"name", Value::object({{"type", Value("string")}, {"description", Value("Endpoint name")}})}
-            })}
-        });
+        return R"({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Endpoint name"}
+            }
+        })"_json;
     }
 
     Value responseSchema() const override {
-        return Value::object({
-            {"type", Value("object")},
-            {"properties", Value::object({
-                {"name", Value::object({{"type", Value("string")}})},
-                {"method", Value::object({{"type", Value("string")}})},
-                {"path", Value::object({{"type", Value("string")}})},
-                {"description", Value::object({{"type", Value("string")}})},
-                {"request", Value::object({{"type", Value("object")}})},
-                {"response", Value::object({{"type", Value("object")}})}
-            })}
-        });
+        return R"({
+            "type": "object",
+            "properties": {
+                "name":        {"type": "string"},
+                "method":      {"type": "string"},
+                "path":        {"type": "string"},
+                "description": {"type": "string"},
+                "request":     {"type": "object"},
+                "response":    {"type": "object"}
+            }
+        })"_json;
     }
 
     Value execute(const Value& request) override {
         std::string endpointName = request.has("name") ? request["name"].asString() : "";
 
         if (endpointName.empty()) {
-            return Value::object({{"error", Value("missing 'name' field")}});
+            return R"({"error": "missing 'name' field"})"_json;
         }
 
         const Command* cmd = _server.findApi(endpointName);

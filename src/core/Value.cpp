@@ -36,7 +36,7 @@ static Value cjsonToValue(cJSON* node) {
     if (!node) return Value();
 
     if (cJSON_IsNull(node))   return Value();
-    if (cJSON_IsBool(node))   return Value(cJSON_IsTrue(node));
+    if (cJSON_IsBool(node))   return Value(static_cast<bool>(cJSON_IsTrue(node)));
     if (cJSON_IsNumber(node)) {
         double d = node->valuedouble;
         if (d == static_cast<int>(d) && d >= INT_MIN && d <= INT_MAX) {
@@ -89,3 +89,7 @@ Value Value::parse(const std::string& json) {
 }
 
 } // namespace noix::core
+
+noix::core::Value operator""_json(const char* str, size_t len) {
+    return noix::core::Value::parse(std::string(str, len));
+}

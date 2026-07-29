@@ -1,6 +1,7 @@
 #pragma once
 
 #include "debug/Command.h"
+#include "core/Value.h"
 
 namespace noix::debug {
 
@@ -14,16 +15,16 @@ public:
     }
 
     Value responseSchema() const override {
-        return Value::object({
-            {"type", Value("object")},
-            {"properties", Value::object({
-                {"status", Value::object({{"type", Value("string")}, {"enum", Value::array({Value("ok")})}})}
-            })}
-        });
+        return R"({
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["ok"]}
+            }
+        })"_json;
     }
 
     Value execute(const Value& /*request*/) override {
-        return Value::object({{"status", Value("ok")}});
+        return R"({"status": "ok"})"_json;
     }
 };
 

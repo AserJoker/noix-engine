@@ -114,3 +114,6 @@ private:
 };
 
 } // namespace noix::core
+
+/* User-defined literal: R"({...})"_json → Value */
+noix::core::Value operator""_json(const char* str, size_t len);
