@@ -1,0 +1,31 @@
+# copy_assets.cmake — Incrementally copy assets/ to dist/assets/
+#
+# Generated from copy_assets.cmake.in by CMake configure_file().
+# Run via: cmake -P copy_assets.cmake
+#
+# Uses cmake -E copy_if_different for each file so unchanged files
+# are skipped (no timestamp bump, no unnecessary I/O).
+
+set(ASSETS_DIR "@CMAKE_SOURCE_DIR@/assets")
+set(DIST_DIR   "@CMAKE_SOURCE_DIR@/dist/assets")
+
+if(NOT EXISTS "${ASSETS_DIR}")
+    return()
+endif()
+
+file(GLOB_RECURSE ASSET_FILES LIST_DIRECTORIES false RELATIVE "${ASSETS_DIR}" "${ASSETS_DIR}/*")
+
+foreach(REL_PATH ${ASSET_FILES})
+    set(SRC "${ASSETS_DIR}/${REL_PATH}")
+    set(DST "${DIST_DIR}/${REL_PATH}")
+
+    # Ensure the parent directory exists
+    get_filename_component(DST_DIR "${DST}" PATH)
+    if(NOT EXISTS "${DST_DIR}")
+        file(MAKE_DIRECTORY "${DST_DIR}")
+    endif()
+
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SRC}" "${DST}"
+    )
+endforeach()

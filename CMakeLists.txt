@@ -70,6 +70,18 @@ set_target_properties(noix-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 
+# ---- Post-build: copy assets to dist (incremental) ----
+configure_file(
+    ${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake.in
+    ${CMAKE_BINARY_DIR}/copy_assets.cmake
+    @ONLY
+)
+
+add_custom_command(TARGET noix-engine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/copy_assets.cmake
+    COMMENT "Copying assets to dist (incremental)"
+)
+
 # ---- Debug Test ----
 add_subdirectory(tests/debug_test)
 
