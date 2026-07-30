@@ -47,11 +47,13 @@ add_executable(noix-engine
     src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
     src/runtime/Locale.cpp
+    src/runtime/SaveManager.cpp
     src/script/NativeModules.cpp
     src/script/modules/LoggerModule.cpp
     src/script/modules/DebugModule.cpp
     src/script/modules/LocaleModule.cpp
     src/script/modules/ConfigModule.cpp
+    src/script/modules/SaveModule.cpp
     src/script/ScriptEngine.cpp
 )
 

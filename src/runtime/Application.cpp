@@ -9,6 +9,7 @@
 #include "debug/commands/SystemShutdownCommand.h"
 #include "resource/ResourcePack.h"
 #include "runtime/Locale.h"
+#include "runtime/SaveManager.h"
 #include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
@@ -150,6 +151,9 @@ void Application::initResourcePack() {
     _resourcePack = std::make_unique<resource::ResourcePack>(_basePath);
     core::Logger::instance().info("ResourcePack initialized (basePath={})", _basePath);
 
+    _saveManager = std::make_unique<runtime::SaveManager>(_basePath);
+    core::Logger::instance().info("SaveManager initialized");
+
     /* Initialize Locale with the resource pack for i18n support */
     runtime::Locale::instance().setResourcePack(_resourcePack.get());
     runtime::Locale::instance().addNamespace("noix");
@@ -278,6 +282,7 @@ void Application::cleanup() {
     _cleanedUp = true;
     _dapServer.reset();
     _debugServer.reset();
+    _saveManager.reset();
     _resourcePack.reset();
     _scriptEngine.reset();
     if (_configManager) {
