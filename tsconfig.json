@@ -13,7 +13,8 @@
     "inlineSourceMap": true,
     "paths": {
       "noix:logger": ["./scripts/noix-modules/logger"],
-      "noix:debug": ["./scripts/noix-modules/debug"]
+      "noix:debug": ["./scripts/noix-modules/debug"],
+      "noix:locale": ["./scripts/noix-modules/locale"]
     }
   },
   "include": ["scripts"]
