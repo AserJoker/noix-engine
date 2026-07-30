@@ -10,7 +10,7 @@ using noix::core::Logger;
 namespace {
 
 static JSValue debug_registerCommand(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
-    if (argc < 2) return JS_ThrowTypeError(ctx, "registerCommand requires (name, handler)");
+    if (argc < 3) return JS_ThrowTypeError(ctx, "registerCommand requires (name, version, handler)");
 
     /* Get name */
     const char* name = JS_ToCString(ctx, argv[0]);
@@ -18,8 +18,14 @@ static JSValue debug_registerCommand(JSContext* ctx, JSValueConst, int argc, JSV
     std::string cmdName(name);
     JS_FreeCString(ctx, name);
 
+    /* Get version */
+    const char* ver = JS_ToCString(ctx, argv[1]);
+    if (!ver) return JS_EXCEPTION;
+    std::string cmdVersion(ver);
+    JS_FreeCString(ctx, ver);
+
     /* Validate handler is a function */
-    if (!JS_IsFunction(ctx, argv[1])) {
+    if (!JS_IsFunction(ctx, argv[2])) {
         return JS_ThrowTypeError(ctx, "handler must be a function");
     }
 
@@ -31,11 +37,11 @@ static JSValue debug_registerCommand(JSContext* ctx, JSValueConst, int argc, JSV
     }
 
     /* Store the JS callback in ScriptEngine (it DupValues internally) */
-    engine->registerCallback(cmdName, ctx, argv[1]);
+    engine->registerCallback(cmdName, ctx, argv[2]);
 
-    /* Create ScriptCallbackCommand — lightweight, only holds name + engine ref */
+    /* Create ScriptCallbackCommand — lightweight, only holds name + version + engine ref */
     auto cmd = std::make_shared<noix::debug::ScriptCallbackCommand>(
-        cmdName, "v1", *engine);
+        cmdName, cmdVersion, *engine);
 
     engine->debugServer()->addApi(cmd);
 
@@ -44,7 +50,7 @@ static JSValue debug_registerCommand(JSContext* ctx, JSValueConst, int argc, JSV
 
 static int debug_module_init(JSContext* ctx, JSModuleDef* m) {
     JS_SetModuleExport(ctx, m, "registerCommand",
-        JS_NewCFunction(ctx, debug_registerCommand, "registerCommand", 2));
+        JS_NewCFunction(ctx, debug_registerCommand, "registerCommand", 3));
     return 0;
 }
 

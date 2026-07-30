@@ -58,18 +58,18 @@ import { registerCommand } from "noix:debug";
 import * as logger from "noix:logger";
 
 // Echo: returns the request body as-is
-registerCommand("script/echo", (request) => {
+registerCommand("script/echo", "v1", (request) => {
     return { echo: request, status: "ok" };
 });
 
 // Greet: extracts name from request, returns greeting
-registerCommand("script/greet", (request) => {
+registerCommand("script/greet", "v1", (request) => {
     const name = request.name || "world";
     return { message: "hello, " + name + "!" };
 });
 
 // Compute: demonstrates request processing
-registerCommand("script/compute", (request) => {
+registerCommand("script/compute", "v1", (request) => {
     const a = request.a || 0;
     const b = request.b || 0;
     return { sum: a + b, product: a * b };

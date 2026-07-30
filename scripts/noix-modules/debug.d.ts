@@ -18,11 +18,13 @@ export interface DebugResponse {
  * Register a script-facing REST API endpoint on the DebugServer.
  *
  * @param name - Hierarchical endpoint name, e.g. "script/echo".
- *               Maps to POST /api/v1/{name}
+ *               Maps to POST /api/v{version}/{name}
+ * @param version - API version string, e.g. "v1".
  * @param handler - Callback invoked when the endpoint receives a request.
  *                  Receives the parsed request object, must return a response object.
  */
 export function registerCommand(
     name: string,
+    version: string,
     handler: (request: DebugRequest) => DebugResponse
 ): void;
