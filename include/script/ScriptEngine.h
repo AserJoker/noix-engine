@@ -14,6 +14,7 @@
 struct JSRuntime;
 struct JSContext;
 struct JSValue;
+struct JSModuleDef;
 
 namespace noix::core {
     class Value;
@@ -73,6 +74,17 @@ public:
     /// Get EventBus
     runtime::EventBus* eventBus() const { return _eventBus; }
 
+    /// Set module resolver: maps module name to file path.
+    /// Called by moduleLoader when a non-relative, non-native import is encountered.
+    using ModuleResolver = std::function<std::string(const std::string& moduleName)>;
+    void setModuleResolver(ModuleResolver resolver);
+
+    /// Load and execute a script file on the script thread (for mod index execution)
+    void loadScriptAsync(const std::string& path);
+
+    /// Load and execute a script string on the script thread (for import statements)
+    void loadScriptStringAsync(const std::string& code, const std::string& filename);
+
     /// Set debug freeze/resume SDL event types
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
 
@@ -126,6 +138,12 @@ private:
 
     /// EventBus back-pointer
     runtime::EventBus* _eventBus = nullptr;
+
+    /// Module resolver (maps module name -> file path)
+    ModuleResolver _moduleResolver;
+
+    // Allow moduleLoader to access _moduleResolver
+    friend JSModuleDef* moduleLoader(JSContext*, const char*, void*);
 
     /// Named JS callbacks (owned by ScriptEngine, guarded by _callbacksMutex)
     std::map<std::string, CallbackEntry> _callbacks;

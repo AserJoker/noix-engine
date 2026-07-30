@@ -17,6 +17,7 @@
       "noix:locale": ["./scripts/noix-modules/locale"],
       "noix:config": ["./scripts/noix-modules/config"],
       "noix:eventbus": ["./scripts/noix-modules/eventbus"],
+      "noix:modmanager": ["./scripts/noix-modules/modmanager"],
       "noix:save": ["./scripts/noix-modules/save"]
     }
   },

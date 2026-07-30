@@ -24,8 +24,10 @@ static int jsInterruptHandler(JSRuntime *rt, void *opaque) {
     return engine->isRunning() ? 0 : 1;
 }
 
-/* Module loader: reads JS source files for import statements.
-   Only handles file-based modules; noix: modules are C-native and resolved before this. */
+/* Module loader: resolves module imports.
+   - Relative imports (./ ../): resolve against scriptsPath
+   - Module resolver callback: maps bare module names to file paths (e.g. mod names)
+   - Falls back to treating the name as a file path */
 static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* opaque) {
     auto* engine = static_cast<ScriptEngine*>(opaque);
     std::string path(module_name);
@@ -33,6 +35,12 @@ static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* 
     /* Relative imports: resolve against scriptsPath */
     if (path.starts_with("./") || path.starts_with("../")) {
         path = engine->scriptsPath() + "/" + path;
+    } else if (engine->_moduleResolver) {
+        /* Try module resolver for bare module names (e.g. mod names) */
+        std::string resolved = engine->_moduleResolver(module_name);
+        if (!resolved.empty()) {
+            path = resolved;
+        }
     }
 
     /* Read file */
@@ -266,6 +274,18 @@ void ScriptEngine::releaseCallbacks() {
     }
 }
 
+void ScriptEngine::setModuleResolver(ModuleResolver resolver) {
+    _moduleResolver = std::move(resolver);
+}
+
+void ScriptEngine::loadScriptAsync(const std::string& path) {
+    postTask([this, path]() {
+        if (!loadScript(path)) {
+            core::Logger::instance().warn("ScriptEngine: failed to load script: {}", path);
+        }
+    });
+}
+
 void ScriptEngine::initQuickJS() {
     _rt = JS_NewRuntime();
     _ctx = JS_NewContext(_rt);
@@ -295,12 +315,6 @@ void ScriptEngine::initQuickJS() {
 
     /* Set up module loader */
     JS_SetModuleLoaderFunc(_rt, nullptr, moduleLoader, this);
-
-    /* Load entry script */
-    std::string entryPath = _scriptsPath + "/entry.js";
-    if (!loadScript(entryPath)) {
-        core::Logger::instance().warn("ScriptEngine: entry script not found: {}", entryPath);
-    }
 }
 
 void ScriptEngine::scriptThreadFunc() {
@@ -366,6 +380,26 @@ bool ScriptEngine::loadScript(const std::string& path) {
     JS_FreeValue(_ctx, result);
     core::Logger::instance().info("ScriptEngine: loaded '{}'", path);
     return true;
+}
+
+void ScriptEngine::loadScriptStringAsync(const std::string& code, const std::string& filename) {
+    postTask([this, code, filename]() {
+        int evalFlags = JS_EVAL_TYPE_MODULE;
+        if (_dapBridge) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
+
+        JSValue result = JS_Eval(_ctx, code.c_str(), code.size(), filename.c_str(), evalFlags);
+        if (JS_IsException(result)) {
+            JSValue exc = JS_GetException(_ctx);
+            const char* msg = JS_ToCString(_ctx, exc);
+            core::Logger::instance().error("ScriptEngine: error loading '{}': {}",
+                                            filename, msg ? msg : "unknown");
+            JS_FreeCString(_ctx, msg);
+            JS_FreeValue(_ctx, exc);
+        } else {
+            JS_FreeValue(_ctx, result);
+            core::Logger::instance().info("ScriptEngine: loaded '{}'", filename);
+        }
+    });
 }
 
 } // namespace noix::script

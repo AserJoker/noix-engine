@@ -43,6 +43,11 @@ void LocaleManager::reset() {
     _translations.clear();
 }
 
+void LocaleManager::reload() {
+    if (_lang.empty()) return;
+    loadTranslations();
+}
+
 std::string LocaleManager::i18n(const std::string& key, const std::string& defaultValue) const {
     auto id = core::NamespacedId::parse(key);
     auto it = _translations.find(id);

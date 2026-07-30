@@ -12,6 +12,7 @@
 #include "runtime/ConfigManager.h"
 #include "runtime/EventBus.h"
 #include "runtime/LocaleManager.h"
+#include "runtime/ModManager.h"
 #include "runtime/SaveManager.h"
 #include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
@@ -206,6 +207,23 @@ void Application::initDebugServer() {
   _eventBus->setScriptEngine(_scriptEngine.get());
   _scriptEngine->setEventBus(_eventBus.get());
 
+  /* ModManager — mod discovery and lifecycle */
+  _modManager = std::make_unique<ModManager>(
+      std::filesystem::path(_basePath) / "mods", *_assetManager);
+  _modManager->discover();
+  _modManager->loadState(*_configManager);
+  _modManager->applyToAssetManager();
+  _scriptEngine->setModuleResolver([this](const std::string& name) -> std::string {
+      auto path = _modManager->resolveModIndex(name);
+      return path ? path->string() : std::string();
+  });
+  _modManager->setOnCommit([this]() {
+      _modManager->applyToAssetManager();
+      _localeManager->reload();
+      _scriptEngine->reset();
+      _modManager->loadMods(*_scriptEngine);
+  });
+
   /* Register SDL event handlers (table-driven) */
   registerEventHandler(shutdownEventType,
                        [this](const SDL_Event &) { _running.store(false); });
@@ -308,6 +326,7 @@ int Application::run() {
     }
     initDebugServer();
     _scriptEngine->start();
+    _modManager->loadMods(*_scriptEngine);
 
     core::Logger::instance().info("noix-engine started ({})",
                                   isHeadless() ? "server-only" : "full");
@@ -351,6 +370,9 @@ void Application::cleanup() {
   _debugServer.reset();
   _localeManager.reset();
   _saveManager.reset();
+  _assetManager.reset();
+  _scriptEngine.reset();
+  _modManager.reset();
   _assetManager.reset();
   _scriptEngine.reset();
   _eventBus.reset();

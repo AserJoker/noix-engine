@@ -13,7 +13,7 @@
 #include <csignal>
 
 namespace noix::debug { class DebugServer; class DapServer; }
-namespace noix::runtime { class AssetManager; class ConfigManager; class EventBus; class LocaleManager; class SaveManager; }
+namespace noix::runtime { class AssetManager; class ConfigManager; class EventBus; class LocaleManager; class ModManager; class SaveManager; }
 namespace noix::script { class ScriptEngine; }
 
 struct SDL_Window;
@@ -70,6 +70,7 @@ public:
     SaveManager& saveManager() const { return *_saveManager; }
     script::ScriptEngine& scriptEngine() const { return *_scriptEngine; }
     EventBus& eventBus() const { return *_eventBus; }
+    ModManager& modManager() const { return *_modManager; }
 
 private:
     bool initCore();
@@ -89,6 +90,7 @@ private:
     std::unique_ptr<debug::DebugServer> _debugServer;
     std::unique_ptr<debug::DapServer> _dapServer;
     std::unique_ptr<EventBus> _eventBus;
+    std::unique_ptr<ModManager> _modManager;
     std::unique_ptr<AssetManager> _assetManager;
     std::unique_ptr<LocaleManager> _localeManager;
     std::unique_ptr<SaveManager> _saveManager;

@@ -14,6 +14,7 @@ void registerNativeModules(JSContext* ctx, ScriptEngine* engine) {
     registerConfigModule(ctx);
     registerSaveModule(ctx);
     registerEventBusModule(ctx);
+    registerModManagerModule(ctx);
 }
 
 } // namespace noix::script

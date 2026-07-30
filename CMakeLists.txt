@@ -31,6 +31,7 @@ add_executable(noix-engine
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
+    src/core/SemVer.cpp
     src/core/Value.cpp
     src/debug/DapBridgeCore.cpp
     src/debug/DapBridgeHandlers.cpp
@@ -44,6 +45,7 @@ add_executable(noix-engine
     src/debug/ScriptCallbackCommand.cpp
     src/runtime/Application.cpp
     src/runtime/EventBus.cpp
+    src/runtime/ModManager.cpp
     src/runtime/AssetManager.cpp
     src/runtime/ConfigManager.cpp
     src/runtime/LocaleManager.cpp
@@ -55,6 +57,7 @@ add_executable(noix-engine
     src/script/modules/ConfigModule.cpp
     src/script/modules/SaveModule.cpp
     src/script/modules/EventBusModule.cpp
+    src/script/modules/ModManagerModule.cpp
     src/script/ScriptEngine.cpp
 )
 

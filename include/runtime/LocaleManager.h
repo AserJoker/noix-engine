@@ -47,6 +47,9 @@ public:
     /// Reset all state — clear translations, locale, and namespace whitelist.
     void reset();
 
+    /// Reload translations for the current locale (e.g., after mod configuration changes).
+    void reload();
+
     /// Look up a translation by fully-qualified key (e.g., "noix:system.window.title").
     /// Returns defaultValue if the key is not found.
     std::string i18n(const std::string& key, const std::string& defaultValue = "") const;
