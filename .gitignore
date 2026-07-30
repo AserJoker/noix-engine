@@ -9,3 +9,4 @@ compile_commands.json
 .cac
 node_modules/
 *.log
+*.spv

@@ -79,6 +79,63 @@ set_target_properties(noix-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 
+# ---- Shader compilation ----
+# Uses glslangValidator from system PATH or VULKAN_SDK to compile GLSL to SPIR-V.
+# .spv files are deployed to dist/assets/ for runtime loading via AssetManager.
+find_program(GLSLANG_VALIDATOR glslangValidator
+    HINTS "$ENV{VULKAN_SDK}/bin"
+    DOC "Path to glslangValidator executable"
+)
+
+if(NOT GLSLANG_VALIDATOR)
+    message(WARNING "glslangValidator not found — shader compilation disabled. "
+                    "Install Vulkan SDK (https://vulkan.lunarg.com) and ensure "
+                    "glslangValidator is in PATH or set VULKAN_SDK env var.")
+else()
+    message(STATUS "Found glslangValidator: ${GLSLANG_VALIDATOR}")
+
+    set(SHADER_SRC_DIR ${CMAKE_SOURCE_DIR}/assets/noix/shaders)
+    set(SHADER_BUILD_DIR ${CMAKE_BINARY_DIR}/shaders)
+    set(SHADER_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/assets/noix/shaders)
+
+    if(EXISTS "${SHADER_SRC_DIR}")
+        file(GLOB_RECURSE SHADER_SOURCES LIST_DIRECTORIES false
+             "${SHADER_SRC_DIR}/*.vert"
+             "${SHADER_SRC_DIR}/*.frag"
+             "${SHADER_SRC_DIR}/*.comp")
+
+        set(SHADER_OUTPUTS "")
+        foreach(SRC ${SHADER_SOURCES})
+            file(RELATIVE_PATH REL_PATH "${SHADER_SRC_DIR}" ${SRC})
+            get_filename_component(REL_DIR ${REL_PATH} DIRECTORY)
+            get_filename_component(BASENAME ${SRC} NAME_WE)
+
+            set(SPV_FILE "${SHADER_BUILD_DIR}/${REL_DIR}/${BASENAME}.spv")
+
+            add_custom_command(
+                OUTPUT ${SPV_FILE}
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_BUILD_DIR}/${REL_DIR}"
+                COMMAND ${GLSLANG_VALIDATOR} -V "${SRC}" -o "${SPV_FILE}"
+                DEPENDS ${SRC}
+                COMMENT "Compiling shader: ${REL_PATH}"
+            )
+            list(APPEND SHADER_OUTPUTS ${SPV_FILE})
+        endforeach()
+
+        add_custom_target(compile_shaders ALL DEPENDS ${SHADER_OUTPUTS})
+
+        foreach(SPV ${SHADER_OUTPUTS})
+            file(RELATIVE_PATH REL_PATH "${SHADER_BUILD_DIR}" ${SPV})
+            set(DST "${SHADER_DIST_DIR}/${REL_PATH}")
+            add_custom_command(
+                TARGET noix-engine POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SPV}" "${DST}"
+                COMMENT "Deploying shader: ${REL_PATH}"
+            )
+        endforeach()
+    endif()
+endif()
+
 # ---- Post-build: copy assets to dist (incremental) ----
 configure_file(
     ${CMAKE_SOURCE_DIR}/cmake/copy_assets.cmake.in
