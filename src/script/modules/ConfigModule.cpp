@@ -1,15 +1,16 @@
 #include "script/NativeModules.h"
 #include "runtime/Application.h"
-#include "core/ConfigManager.h"
+#include "runtime/ConfigManager.h"
 #include "core/Logger.h"
 #include "core/NamespacedId.h"
+#include "core/Value.h"
 #include "quickjs.h"
 #include <string>
 
 using noix::runtime::Application;
-using noix::core::ConfigManager;
-using noix::core::Config;
+using noix::runtime::ConfigManager;
 using noix::core::NamespacedId;
+using noix::core::Value;
 
 namespace {
 
@@ -17,11 +18,6 @@ static ConfigManager& getMgr() {
     return Application::instance().configManager();
 }
 
-/**
- * Helper: convert a JS value to JSON string via JS_JSONStringify.
- * Caller must free the returned string with JS_FreeCString + JS_FreeValue.
- * Returns empty string on error.
- */
 static std::string jsToJson(JSContext* ctx, JSValueConst val) {
     JSValue jsonVal = JS_JSONStringify(ctx, val, JS_UNDEFINED, JS_UNDEFINED);
     if (JS_IsException(jsonVal)) return "";
@@ -47,10 +43,10 @@ static JSValue config_get(JSContext* ctx, JSValueConst, int argc, JSValueConst* 
     std::string json = jsToJson(ctx, argv[1]);
     if (json.empty()) return JS_EXCEPTION;
 
-    Config defaultCfg = ConfigManager::fromJson(json);
-    Config cfg = getMgr().getOrDefault(id, std::move(defaultCfg));
+    Value defaultVal = Value::parse(json);
+    Value cfg = getMgr().getOrDefault(id, defaultVal);
 
-    std::string resultJson = cfg.toJson();
+    std::string resultJson = cfg.dump();
     return JS_ParseJSON(ctx, resultJson.c_str(), resultJson.size(), "<config>");
 }
 
@@ -66,8 +62,8 @@ static JSValue config_set(JSContext* ctx, JSValueConst, int argc, JSValueConst* 
     std::string json = jsToJson(ctx, argv[1]);
     if (json.empty()) return JS_EXCEPTION;
 
-    Config cfg = ConfigManager::fromJson(json);
-    getMgr().set(id, std::move(cfg));
+    Value val = Value::parse(json);
+    getMgr().set(id, std::move(val));
 
     return JS_UNDEFINED;
 }

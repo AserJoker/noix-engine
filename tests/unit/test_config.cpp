@@ -1,172 +1,97 @@
 #include <gtest/gtest.h>
-#include "core/Config.h"
+#include "core/Value.h"
 
 using namespace noix::core;
 
-TEST(Config, DefaultConstructIsNotEmpty) {
-    Config cfg;
-    EXPECT_TRUE(static_cast<bool>(cfg));
+TEST(Value, DefaultConstructIsNull) {
+    Value v;
+    EXPECT_TRUE(v.isNull());
 }
 
-TEST(Config, HasKey) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    EXPECT_TRUE(cfg.has("port"));
-    EXPECT_FALSE(cfg.has("host"));
+TEST(Value, BoolValue) {
+    Value v(true);
+    EXPECT_TRUE(v.isBool());
+    EXPECT_TRUE(v.asBool());
 }
 
-TEST(Config, SetAndGetString) {
-    Config cfg;
-    cfg.setString("host", "localhost");
-    auto val = cfg.getString("host");
-    ASSERT_TRUE(val.has_value());
-    EXPECT_EQ(val.value(), "localhost");
+TEST(Value, IntValue) {
+    Value v(42);
+    EXPECT_TRUE(v.isNumber());
+    EXPECT_EQ(v.asInt(), 42);
 }
 
-TEST(Config, GetStringDefault) {
-    Config cfg;
-    EXPECT_EQ(cfg.getString("missing", "fallback"), "fallback");
+TEST(Value, DoubleValue) {
+    Value v(3.14);
+    EXPECT_TRUE(v.isNumber());
+    EXPECT_DOUBLE_EQ(v.asDouble(), 3.14);
 }
 
-TEST(Config, SetAndGetInt) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    auto val = cfg.getInt("port");
-    ASSERT_TRUE(val.has_value());
-    EXPECT_EQ(val.value(), 9900);
+TEST(Value, StringValue) {
+    Value v("hello");
+    EXPECT_TRUE(v.isString());
+    EXPECT_EQ(v.asString(), "hello");
 }
 
-TEST(Config, GetIntDefault) {
-    Config cfg;
-    EXPECT_EQ(cfg.getInt("missing", 8080), 8080);
+TEST(Value, ObjectValue) {
+    Value v = Value::object();
+    EXPECT_TRUE(v.isObject());
 }
 
-TEST(Config, SetAndGetDouble) {
-    Config cfg;
-    cfg.setDouble("ratio", 3.14);
-    auto val = cfg.getDouble("ratio");
-    ASSERT_TRUE(val.has_value());
-    EXPECT_DOUBLE_EQ(val.value(), 3.14);
+TEST(Value, ArrayValue) {
+    Value v = Value::array();
+    EXPECT_TRUE(v.isArray());
 }
 
-TEST(Config, SetAndGetBool) {
-    Config cfg;
-    cfg.setBool("enabled", true);
-    EXPECT_TRUE(cfg.getBool("enabled").value_or(false));
-    cfg.setBool("enabled", false);
-    EXPECT_FALSE(cfg.getBool("enabled").value_or(true));
+TEST(Value, ObjectHasAndGet) {
+    Value v = Value::object();
+    v.asObject()["port"] = 9900;
+    v.asObject()["host"] = "localhost";
+    EXPECT_TRUE(v.has("port"));
+    EXPECT_FALSE(v.has("missing"));
+    EXPECT_EQ(v["port"].asInt(), 9900);
+    EXPECT_EQ(v["host"].asString(), "localhost");
 }
 
-TEST(Config, GetBoolDefault) {
-    Config cfg;
-    EXPECT_TRUE(cfg.getBool("missing", true));
-    EXPECT_FALSE(cfg.getBool("missing", false));
+TEST(Value, ObjectOverwrite) {
+    Value v = Value::object();
+    v.asObject()["port"] = 9900;
+    v.asObject()["port"] = 8080;
+    EXPECT_EQ(v["port"].asInt(), 8080);
 }
 
-TEST(Config, MissingKeyReturnsNullopt) {
-    Config cfg;
-    EXPECT_FALSE(cfg.getString("nokey").has_value());
-    EXPECT_FALSE(cfg.getInt("nokey").has_value());
-    EXPECT_FALSE(cfg.getDouble("nokey").has_value());
-    EXPECT_FALSE(cfg.getBool("nokey").has_value());
+TEST(Value, NestedObject) {
+    Value v = Value::object();
+    Value window = Value::object();
+    window.asObject()["mode"] = "windowed";
+    v.asObject()["window"] = std::move(window);
+    EXPECT_TRUE(v["window"].isObject());
+    EXPECT_EQ(v["window"]["mode"].asString(), "windowed");
 }
 
-TEST(Config, TypeMismatchReturnsNullopt) {
-    Config cfg;
-    cfg.setString("name", "hello");
-    EXPECT_FALSE(cfg.getInt("name").has_value());
-    EXPECT_FALSE(cfg.getBool("name").has_value());
-
-    cfg.setInt("count", 42);
-    EXPECT_FALSE(cfg.getString("count").has_value());
+TEST(Value, RemoveKey) {
+    Value v = Value::object();
+    v.asObject()["port"] = 9900;
+    EXPECT_TRUE(v.has("port"));
+    v.asObject().erase("port");
+    EXPECT_FALSE(v.has("port"));
 }
 
-TEST(Config, SetObject) {
-    Config child;
-    child.setString("ip", "127.0.0.1");
-    child.setInt("port", 8080);
-
-    Config cfg;
-    cfg.setObject("server", std::move(child));
-
-    auto server = cfg.getObject("server");
-    ASSERT_TRUE(static_cast<bool>(server));
-    EXPECT_EQ(server.getString("ip").value_or(""), "127.0.0.1");
-    EXPECT_EQ(server.getInt("port").value_or(0), 8080);
-}
-
-TEST(Config, GetObjectMissing) {
-    Config cfg;
-    auto obj = cfg.getObject("missing");
-    EXPECT_FALSE(static_cast<bool>(obj));
-}
-
-TEST(Config, Remove) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    EXPECT_TRUE(cfg.remove("port"));
-    EXPECT_FALSE(cfg.has("port"));
-    EXPECT_FALSE(cfg.remove("port")); // already removed
-}
-
-TEST(Config, RemoveMissingKey) {
-    Config cfg;
-    EXPECT_FALSE(cfg.remove("nonexistent"));
-}
-
-TEST(Config, OverwriteValue) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    cfg.setInt("port", 8080);
-    EXPECT_EQ(cfg.getInt("port").value_or(0), 8080);
-}
-
-TEST(Config, OverwriteString) {
-    Config cfg;
-    cfg.setString("host", "localhost");
-    cfg.setString("host", "example.com");
-    EXPECT_EQ(cfg.getString("host").value_or(""), "example.com");
-}
-
-TEST(Config, ToJson) {
-    Config cfg;
-    cfg.setString("host", "localhost");
-    cfg.setInt("port", 9900);
-    std::string json = cfg.toJson();
+TEST(Value, DumpAndParse) {
+    Value v = Value::object();
+    v.asObject()["host"] = "localhost";
+    v.asObject()["port"] = 9900;
+    std::string json = v.dump();
     EXPECT_NE(json.find("\"host\""), std::string::npos);
-    EXPECT_NE(json.find("\"port\""), std::string::npos);
-    EXPECT_NE(json.find("localhost"), std::string::npos);
     EXPECT_NE(json.find("9900"), std::string::npos);
+
+    Value parsed = Value::parse(json);
+    EXPECT_TRUE(parsed.isObject());
+    EXPECT_EQ(parsed["host"].asString(), "localhost");
+    EXPECT_EQ(parsed["port"].asInt(), 9900);
 }
 
-TEST(Config, MoveConstruct) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    Config moved = std::move(cfg);
-    EXPECT_EQ(moved.getInt("port").value_or(0), 9900);
-}
-
-TEST(Config, CopyConstruct) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    Config copy(cfg);
-    EXPECT_EQ(copy.getInt("port").value_or(0), 9900);
-    // original still valid
-    EXPECT_EQ(cfg.getInt("port").value_or(0), 9900);
-}
-
-TEST(Config, MoveAssign) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    Config other;
-    other = std::move(cfg);
-    EXPECT_EQ(other.getInt("port").value_or(0), 9900);
-}
-
-TEST(Config, CopyAssign) {
-    Config cfg;
-    cfg.setInt("port", 9900);
-    Config other;
-    other = cfg;
-    EXPECT_EQ(other.getInt("port").value_or(0), 9900);
+TEST(Value, AccessOnNonObjectReturnsNull) {
+    Value v(42);
+    EXPECT_FALSE(v.has("key"));
+    EXPECT_TRUE(v["key"].isNull());
 }

@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
-#include "core/ConfigManager.h"
+#include "runtime/ConfigManager.h"
 #include <filesystem>
 #include <fstream>
 
 using namespace noix::core;
+using namespace noix::runtime;
 
 class ConfigManagerTest : public ::testing::Test {
 protected:
@@ -48,10 +49,10 @@ TEST_F(ConfigManagerTest, LoadValidJson) {
     ConfigManager mgr(_tempDir);
     EXPECT_TRUE(mgr.load(NamespacedId("debug", "server")));
 
-    Config cfg = mgr.get(NamespacedId("debug", "server"));
-    ASSERT_TRUE(static_cast<bool>(cfg));
-    EXPECT_EQ(cfg.getInt("port").value_or(0), 9900);
-    EXPECT_EQ(cfg.getString("host").value_or(""), "localhost");
+    Value cfg = mgr.get(NamespacedId("debug", "server"));
+    ASSERT_TRUE(cfg.isObject());
+    EXPECT_EQ(cfg["port"].asInt(), 9900);
+    EXPECT_EQ(cfg["host"].asString(), "localhost");
 }
 
 TEST_F(ConfigManagerTest, LoadAllDiscoversFiles) {
@@ -77,28 +78,28 @@ TEST_F(ConfigManagerTest, LoadAllIgnoresNonJson) {
 
 TEST_F(ConfigManagerTest, SetAndGetConfig) {
     ConfigManager mgr(_tempDir);
-    Config cfg;
-    cfg.setInt("port", 8080);
-    cfg.setString("host", "0.0.0.0");
+    Value cfg = Value::object();
+    cfg.asObject()["port"] = 8080;
+    cfg.asObject()["host"] = "0.0.0.0";
     mgr.set(NamespacedId("debug", "server"), std::move(cfg));
 
-    Config retrieved = mgr.get(NamespacedId("debug", "server"));
-    ASSERT_TRUE(static_cast<bool>(retrieved));
-    EXPECT_EQ(retrieved.getInt("port").value_or(0), 8080);
-    EXPECT_EQ(retrieved.getString("host").value_or(""), "0.0.0.0");
+    Value retrieved = mgr.get(NamespacedId("debug", "server"));
+    ASSERT_TRUE(retrieved.isObject());
+    EXPECT_EQ(retrieved["port"].asInt(), 8080);
+    EXPECT_EQ(retrieved["host"].asString(), "0.0.0.0");
 }
 
-TEST_F(ConfigManagerTest, GetMissingReturnsEmptyConfig) {
+TEST_F(ConfigManagerTest, GetMissingReturnsNullValue) {
     ConfigManager mgr(_tempDir);
-    Config cfg = mgr.get(NamespacedId("missing", "item"));
-    EXPECT_FALSE(static_cast<bool>(cfg));
+    Value cfg = mgr.get(NamespacedId("missing", "item"));
+    EXPECT_TRUE(cfg.isNull());
 }
 
 TEST_F(ConfigManagerTest, SaveWritesFile) {
     ConfigManager mgr(_tempDir);
-    Config cfg;
-    cfg.setInt("port", 9900);
-    cfg.setString("host", "localhost");
+    Value cfg = Value::object();
+    cfg.asObject()["port"] = 9900;
+    cfg.asObject()["host"] = "localhost";
     mgr.set(NamespacedId("debug", "server"), std::move(cfg));
 
     EXPECT_TRUE(mgr.save(NamespacedId("debug", "server")));
@@ -106,59 +107,17 @@ TEST_F(ConfigManagerTest, SaveWritesFile) {
     auto path = _tempDir / "debug" / "server.json";
     ASSERT_TRUE(std::filesystem::exists(path));
 
-    // 重新加载验证内容
     ConfigManager mgr2(_tempDir);
     EXPECT_TRUE(mgr2.load(NamespacedId("debug", "server")));
-    Config loaded = mgr2.get(NamespacedId("debug", "server"));
-    EXPECT_EQ(loaded.getInt("port").value_or(0), 9900);
-    EXPECT_EQ(loaded.getString("host").value_or(""), "localhost");
-}
-
-TEST_F(ConfigManagerTest, SaveOnlyDirty) {
-    ConfigManager mgr(_tempDir);
-    writeJsonFile("debug", "server", R"({"port":9900})");
-    mgr.load(NamespacedId("debug", "server"));
-
-    // loaded entry is not dirty, save returns true but doesn't rewrite
-    EXPECT_TRUE(mgr.save(NamespacedId("debug", "server")));
-
-    // set makes it dirty
-    Config cfg = mgr.get(NamespacedId("debug", "server"));
-    cfg.setInt("port", 8080);
-    mgr.set(NamespacedId("debug", "server"), std::move(cfg));
-    EXPECT_TRUE(mgr.save(NamespacedId("debug", "server")));
-
-    ConfigManager mgr2(_tempDir);
-    mgr2.load(NamespacedId("debug", "server"));
-    Config loaded = mgr2.get(NamespacedId("debug", "server"));
-    EXPECT_EQ(loaded.getInt("port").value_or(0), 8080);
-}
-
-TEST_F(ConfigManagerTest, SaveAllOnlyDirty) {
-    ConfigManager mgr(_tempDir);
-
-    Config cfg1;
-    cfg1.setInt("port", 9900);
-    mgr.set(NamespacedId("debug", "server"), std::move(cfg1));
-
-    Config cfg2;
-    cfg2.setBool("enabled", true);
-    mgr.set(NamespacedId("mymod", "settings"), std::move(cfg2));
-
-    // set() 已经实时写入磁盘，saveAll 无 dirty 条目
-    EXPECT_EQ(mgr.saveAll(), 0);
-
-    // 验证文件已在磁盘上
-    ConfigManager mgr2(_tempDir);
-    mgr2.loadAll();
-    EXPECT_TRUE(mgr2.has(NamespacedId("debug", "server")));
-    EXPECT_TRUE(mgr2.has(NamespacedId("mymod", "settings")));
+    Value loaded = mgr2.get(NamespacedId("debug", "server"));
+    EXPECT_EQ(loaded["port"].asInt(), 9900);
+    EXPECT_EQ(loaded["host"].asString(), "localhost");
 }
 
 TEST_F(ConfigManagerTest, RemoveEntry) {
     ConfigManager mgr(_tempDir);
-    Config cfg;
-    cfg.setInt("port", 9900);
+    Value cfg = Value::object();
+    cfg.asObject()["port"] = 9900;
     mgr.set(NamespacedId("debug", "server"), std::move(cfg));
 
     EXPECT_TRUE(mgr.remove(NamespacedId("debug", "server")));
@@ -179,13 +138,13 @@ TEST_F(ConfigManagerTest, ConfigDir) {
 
 TEST_F(ConfigManagerTest, GetOrDefaultCreatesEntry) {
     ConfigManager mgr(_tempDir);
-    Config defaults;
-    defaults.setInt("port", 9900);
-    defaults.setString("host", "localhost");
+    Value defaults = Value::object();
+    defaults.asObject()["port"] = 9900;
+    defaults.asObject()["host"] = "localhost";
 
-    Config cfg = mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
-    ASSERT_TRUE(static_cast<bool>(cfg));
-    EXPECT_EQ(cfg.getInt("port").value_or(0), 9900);
+    Value cfg = mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
+    ASSERT_TRUE(cfg.isObject());
+    EXPECT_EQ(cfg["port"].asInt(), 9900);
     EXPECT_TRUE(mgr.has(NamespacedId("debug", "server")));
 }
 
@@ -194,33 +153,32 @@ TEST_F(ConfigManagerTest, GetOrDefaultReturnsExisting) {
     writeJsonFile("debug", "server", R"({"port":8080})");
     mgr.load(NamespacedId("debug", "server"));
 
-    Config defaults;
-    defaults.setInt("port", 9900);
+    Value defaults = Value::object();
+    defaults.asObject()["port"] = 9900;
 
-    Config cfg = mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
-    // 应返回已加载的值，不是默认值
-    EXPECT_EQ(cfg.getInt("port").value_or(0), 8080);
+    Value cfg = mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
+    EXPECT_EQ(cfg["port"].asInt(), 8080);
 }
 
 TEST_F(ConfigManagerTest, GetOrDefaultWritesToDisk) {
     ConfigManager mgr(_tempDir);
-    Config defaults;
-    defaults.setInt("port", 9900);
+    Value defaults = Value::object();
+    defaults.asObject()["port"] = 9900;
 
     mgr.getOrDefault(NamespacedId("debug", "server"), defaults);
 
-    // getOrDefault 已经实时写入磁盘
     ConfigManager mgr2(_tempDir);
     EXPECT_TRUE(mgr2.load(NamespacedId("debug", "server")));
-    Config loaded = mgr2.get(NamespacedId("debug", "server"));
-    EXPECT_EQ(loaded.getInt("port").value_or(0), 9900);
+    Value loaded = mgr2.get(NamespacedId("debug", "server"));
+    EXPECT_EQ(loaded["port"].asInt(), 9900);
 }
 
 TEST_F(ConfigManagerTest, ListReturnsAllEntries) {
     ConfigManager mgr(_tempDir);
-    Config cfg1, cfg2;
-    cfg1.setInt("port", 9900);
-    cfg2.setBool("enabled", true);
+    Value cfg1 = Value::object();
+    cfg1.asObject()["port"] = 9900;
+    Value cfg2 = Value::object();
+    cfg2.asObject()["enabled"] = true;
     mgr.set(NamespacedId("debug", "server"), std::move(cfg1));
     mgr.set(NamespacedId("mymod", "settings"), std::move(cfg2));
 

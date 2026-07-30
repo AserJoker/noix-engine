@@ -1,10 +1,12 @@
 #include "script/NativeModules.h"
-#include "runtime/Locale.h"
+#include "runtime/Application.h"
+#include "runtime/LocaleManager.h"
 #include "core/Logger.h"
 #include "quickjs.h"
 #include <string>
 
-using noix::runtime::Locale;
+using noix::runtime::Application;
+using noix::runtime::LocaleManager;
 
 namespace {
 
@@ -23,7 +25,7 @@ static JSValue locale_i18n(JSContext* ctx, JSValueConst, int argc, JSValueConst*
         }
     }
 
-    std::string result = Locale::instance().i18n(key, defaultValue);
+    std::string result = Application::instance().localeManager().i18n(key, defaultValue);
     JS_FreeCString(ctx, key);
 
     return JS_NewStringLen(ctx, result.c_str(), result.size());
@@ -35,14 +37,14 @@ static JSValue locale_setLang(JSContext* ctx, JSValueConst, int argc, JSValueCon
     const char* lang = JS_ToCString(ctx, argv[0]);
     if (!lang) return JS_EXCEPTION;
 
-    Locale::instance().setLang(lang);
+    Application::instance().localeManager().setLang(lang);
     JS_FreeCString(ctx, lang);
 
     return JS_UNDEFINED;
 }
 
 static JSValue locale_getLang(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    const auto& lang = Locale::instance().lang();
+    const auto& lang = Application::instance().localeManager().lang();
     return JS_NewStringLen(ctx, lang.c_str(), lang.size());
 }
 
@@ -50,7 +52,7 @@ static JSValue locale_addNamespace(JSContext* ctx, JSValueConst, int argc, JSVal
     if (argc < 1) return JS_ThrowTypeError(ctx, "addNamespace requires 1 argument (namespace)");
     const char* ns = JS_ToCString(ctx, argv[0]);
     if (!ns) return JS_EXCEPTION;
-    Locale::instance().addNamespace(ns);
+    Application::instance().localeManager().addNamespace(ns);
     JS_FreeCString(ctx, ns);
     return JS_UNDEFINED;
 }
@@ -59,13 +61,13 @@ static JSValue locale_removeNamespace(JSContext* ctx, JSValueConst, int argc, JS
     if (argc < 1) return JS_ThrowTypeError(ctx, "removeNamespace requires 1 argument (namespace)");
     const char* ns = JS_ToCString(ctx, argv[0]);
     if (!ns) return JS_EXCEPTION;
-    Locale::instance().removeNamespace(ns);
+    Application::instance().localeManager().removeNamespace(ns);
     JS_FreeCString(ctx, ns);
     return JS_UNDEFINED;
 }
 
 static JSValue locale_reset(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    Locale::instance().reset();
+    Application::instance().localeManager().reset();
     return JS_UNDEFINED;
 }
 

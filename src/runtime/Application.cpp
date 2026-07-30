@@ -1,5 +1,8 @@
 #include "runtime/Application.h"
-#include "core/ConfigManager.h"
+#include "runtime/AssetManager.h"
+#include "runtime/ConfigManager.h"
+#include "runtime/LocaleManager.h"
+#include "runtime/SaveManager.h"
 #include "core/Logger.h"
 #include "debug/DebugServer.h"
 #include "debug/DapServer.h"
@@ -7,9 +10,6 @@
 #include "debug/commands/InfoCommand.h"
 #include "debug/commands/SchemaCommand.h"
 #include "debug/commands/SystemShutdownCommand.h"
-#include "resource/ResourcePack.h"
-#include "runtime/Locale.h"
-#include "runtime/SaveManager.h"
 #include "script/ScriptEngine.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
@@ -93,16 +93,16 @@ bool Application::initCore() {
 
 bool Application::initWindow() {
     auto cfg = _configManager->get(core::NamespacedId("noix", "application"));
-    auto windowCfg = cfg.getObject("window");
-    WindowMode mode = parseWindowMode(windowCfg.getString("mode", "windowed"));
-    Resolution res = parseResolution(windowCfg.getString("resolution", "fhd"));
+    auto windowCfg = cfg["window"];
+    WindowMode mode = parseWindowMode(windowCfg.has("mode") ? windowCfg["mode"].asString() : "windowed");
+    Resolution res = parseResolution(windowCfg.has("resolution") ? windowCfg["resolution"].asString() : "fhd");
     auto [width, height] = getResolutionSize(res);
 
     SDL_WindowFlags flags = 0;
     if (mode == WindowMode::Fullscreen) flags = SDL_WINDOW_FULLSCREEN;
     else if (mode == WindowMode::Borderless) flags = SDL_WINDOW_BORDERLESS;
 
-    _window = SDL_CreateWindow(Locale::instance().i18n("noix:system.window.title","noix-engine").c_str(), width, height, flags);
+    _window = SDL_CreateWindow(_localeManager->i18n("noix:system.window.title","noix-engine").c_str(), width, height, flags);
     if (!_window) {
         core::Logger::instance().error("SDL_CreateWindow failed: {}", SDL_GetError());
         return false;
@@ -148,16 +148,15 @@ void Application::initLogger() {
 }
 
 void Application::initResourcePack() {
-    _resourcePack = std::make_unique<resource::ResourcePack>(_basePath);
-    core::Logger::instance().info("ResourcePack initialized (basePath={})", _basePath);
+    _assetManager = std::make_unique<AssetManager>(_basePath);
+    core::Logger::instance().info("AssetManager initialized (basePath={})", _basePath);
 
-    _saveManager = std::make_unique<runtime::SaveManager>(_basePath);
+    _saveManager = std::make_unique<SaveManager>(_basePath);
     core::Logger::instance().info("SaveManager initialized");
 
-    /* Initialize Locale with the resource pack for i18n support */
-    runtime::Locale::instance().setResourcePack(_resourcePack.get());
-    runtime::Locale::instance().addNamespace("noix");
-    runtime::Locale::instance().setLang("en_US");
+    _localeManager = std::make_unique<LocaleManager>(_assetManager.get());
+    _localeManager->addNamespace("noix");
+    _localeManager->setLang("en_US");
 }
 
 void Application::initDebugServer() {
@@ -231,16 +230,16 @@ int Application::run() {
     try {
     initLogger();
     if (!initCore()) { cleanup(); return 1; }
-    _configManager = std::make_unique<core::ConfigManager>(
+    _configManager = std::make_unique<ConfigManager>(
         std::filesystem::path(_basePath) / "config");
     _configManager->loadAll();
 
     {
-        core::Config defaults;
-        core::Config windowDefaults;
-        windowDefaults.setString("mode", "windowed");
-        windowDefaults.setString("resolution", "fhd");
-        defaults.setObject("window", std::move(windowDefaults));
+        core::Value defaults = core::Value::object();
+        core::Value windowDefaults = core::Value::object();
+        windowDefaults.asObject()["mode"] = "windowed";
+        windowDefaults.asObject()["resolution"] = "fhd";
+        defaults.asObject()["window"] = std::move(windowDefaults);
         _configManager->getOrDefault(core::NamespacedId("noix", "application"), defaults);
     }
 
@@ -282,8 +281,9 @@ void Application::cleanup() {
     _cleanedUp = true;
     _dapServer.reset();
     _debugServer.reset();
+    _localeManager.reset();
     _saveManager.reset();
-    _resourcePack.reset();
+    _assetManager.reset();
     _scriptEngine.reset();
     if (_configManager) {
         _configManager->saveAll();

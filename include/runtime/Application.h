@@ -9,10 +9,8 @@
 
 #include <csignal>
 
-namespace noix::core { class ConfigManager; }
 namespace noix::debug { class DebugServer; class DapServer; }
-namespace noix::resource { class ResourcePack; }
-namespace noix::runtime { class SaveManager; }
+namespace noix::runtime { class AssetManager; class ConfigManager; class LocaleManager; class SaveManager; }
 namespace noix::script { class ScriptEngine; }
 
 struct SDL_Window;
@@ -61,11 +59,12 @@ public:
 
     const std::string& basePath() const { return _basePath; }
     const core::ArgsParser& args() const { return _args; }
-    core::ConfigManager& configManager() const { return *_configManager; }
+    ConfigManager& configManager() const { return *_configManager; }
     RunMode runMode() const { return _runMode; }
     bool isHeadless() const { return _runMode == RunMode::ServerOnly; }
-    resource::ResourcePack& resourcePack() const { return *_resourcePack; }
-    runtime::SaveManager& saveManager() const { return *_saveManager; }
+    AssetManager& assetManager() const { return *_assetManager; }
+    LocaleManager& localeManager() const { return *_localeManager; }
+    SaveManager& saveManager() const { return *_saveManager; }
     script::ScriptEngine& scriptEngine() const { return *_scriptEngine; }
 
 private:
@@ -79,11 +78,12 @@ private:
 
     core::ArgsParser _args;
     std::string _basePath;
-    std::unique_ptr<core::ConfigManager> _configManager;
+    std::unique_ptr<ConfigManager> _configManager;
     std::unique_ptr<debug::DebugServer> _debugServer;
     std::unique_ptr<debug::DapServer> _dapServer;
-    std::unique_ptr<resource::ResourcePack> _resourcePack;
-    std::unique_ptr<runtime::SaveManager> _saveManager;
+    std::unique_ptr<AssetManager> _assetManager;
+    std::unique_ptr<LocaleManager> _localeManager;
+    std::unique_ptr<SaveManager> _saveManager;
     std::unique_ptr<script::ScriptEngine> _scriptEngine;
     SDL_Window* _window = nullptr;
     std::atomic<bool> _running{false};

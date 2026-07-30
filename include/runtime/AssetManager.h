@@ -5,15 +5,15 @@
 #include <optional>
 #include <vector>
 
-namespace noix::resource {
+namespace noix::runtime {
 
-class ResourcePack {
+class AssetManager {
 public:
-    explicit ResourcePack(std::filesystem::path basePath);
-    ~ResourcePack() = default;
+    explicit AssetManager(std::filesystem::path basePath);
+    ~AssetManager() = default;
 
-    ResourcePack(const ResourcePack&) = delete;
-    ResourcePack& operator=(const ResourcePack&) = delete;
+    AssetManager(const AssetManager&) = delete;
+    AssetManager& operator=(const AssetManager&) = delete;
 
     /// Add a resource pack directory. Later additions have higher priority.
     void addPack(const std::filesystem::path& packPath);
@@ -53,4 +53,4 @@ private:
     std::vector<std::filesystem::path> _packRoots;
 };
 
-} // namespace noix::resource
+} // namespace noix::runtime

@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
-#include "resource/ResourcePack.h"
+#include "runtime/AssetManager.h"
 #include <filesystem>
 #include <fstream>
 
 using namespace noix::core;
-using namespace noix::resource;
+using namespace noix::runtime;
 
-class ResourcePackTest : public ::testing::Test {
+class AssetManagerTest : public ::testing::Test {
 protected:
     std::filesystem::path _tmpDir;
 
@@ -45,34 +45,34 @@ protected:
     }
 };
 
-TEST_F(ResourcePackTest, ResolveDefaultResource) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, ResolveDefaultResource) {
+    AssetManager pack(_tmpDir);
     auto result = pack.resolve(NamespacedId("noix", "textures/stone.png"));
     ASSERT_TRUE(result.has_value());
     EXPECT_TRUE(result->string().find("assets") != std::string::npos);
 }
 
-TEST_F(ResourcePackTest, ResolveUnqualified) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, ResolveUnqualified) {
+    AssetManager pack(_tmpDir);
     auto result = pack.resolve(NamespacedId("textures/stone.png"));
     ASSERT_TRUE(result.has_value());
 }
 
-TEST_F(ResourcePackTest, ResolveNotExists) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, ResolveNotExists) {
+    AssetManager pack(_tmpDir);
     auto result = pack.resolve(NamespacedId("noix", "notexist.txt"));
     EXPECT_FALSE(result.has_value());
 }
 
-TEST_F(ResourcePackTest, AddPackAndResolve) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, AddPackAndResolve) {
+    AssetManager pack(_tmpDir);
     pack.addPack(_extPack);
     auto result = pack.resolve(NamespacedId("mymod", "sprites/player.png"));
     ASSERT_TRUE(result.has_value());
 }
 
-TEST_F(ResourcePackTest, PriorityOverlay) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, PriorityOverlay) {
+    AssetManager pack(_tmpDir);
     pack.addPack(_extPack);
     // "noix:textures/stone.png" should resolve to the external pack's version
     auto result = pack.resolve(NamespacedId("noix", "textures/stone.png"));
@@ -84,19 +84,19 @@ TEST_F(ResourcePackTest, PriorityOverlay) {
     EXPECT_EQ(content, "override");
 }
 
-TEST_F(ResourcePackTest, DefaultPathCorrect) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, DefaultPathCorrect) {
+    AssetManager pack(_tmpDir);
     EXPECT_EQ(pack.defaultPath(), _tmpDir);
 }
 
-TEST_F(ResourcePackTest, ExistsMethod) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, ExistsMethod) {
+    AssetManager pack(_tmpDir);
     EXPECT_TRUE(pack.exists(NamespacedId("noix", "textures/stone.png")));
     EXPECT_FALSE(pack.exists(NamespacedId("noix", "nonexistent")));
 }
 
-TEST_F(ResourcePackTest, RemovePack) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, RemovePack) {
+    AssetManager pack(_tmpDir);
     pack.addPack(_extPack);
     EXPECT_EQ(pack.packCount(), 1u);
 
@@ -112,12 +112,12 @@ TEST_F(ResourcePackTest, RemovePack) {
     EXPECT_EQ(content, "default");
 }
 
-TEST_F(ResourcePackTest, RemovePackNotFound) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, RemovePackNotFound) {
+    AssetManager pack(_tmpDir);
     EXPECT_FALSE(pack.removePack(_tmpDir / "nonexistent"));
 }
 
-TEST_F(ResourcePackTest, MovePackUp) {
+TEST_F(AssetManagerTest, MovePackUp) {
     // Create two external packs with the same resource
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
@@ -128,7 +128,7 @@ TEST_F(ResourcePackTest, MovePackUp) {
     writeText(dir1 / "stone.png", "pack1");
     writeText(dir2 / "stone.png", "pack2");
 
-    ResourcePack pack(_tmpDir);
+    AssetManager pack(_tmpDir);
     pack.addPack(pack1);
     pack.addPack(pack2);
 
@@ -146,7 +146,7 @@ TEST_F(ResourcePackTest, MovePackUp) {
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(f2), {}), "pack1");
 }
 
-TEST_F(ResourcePackTest, MovePackDown) {
+TEST_F(AssetManagerTest, MovePackDown) {
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
     auto dir1 = pack1 / "assets" / "noix" / "textures";
@@ -156,7 +156,7 @@ TEST_F(ResourcePackTest, MovePackDown) {
     writeText(dir1 / "stone.png", "pack1");
     writeText(dir2 / "stone.png", "pack2");
 
-    ResourcePack pack(_tmpDir);
+    AssetManager pack(_tmpDir);
     pack.addPack(pack1);
     pack.addPack(pack2);
 
@@ -168,41 +168,41 @@ TEST_F(ResourcePackTest, MovePackDown) {
     EXPECT_EQ(list[1], std::filesystem::weakly_canonical(pack1));
 }
 
-TEST_F(ResourcePackTest, MovePackUpAlreadyHighest) {
+TEST_F(AssetManagerTest, MovePackUpAlreadyHighest) {
     auto pack1 = _tmpDir / "pack1";
     auto dir1 = pack1 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     writeText(dir1 / "stone.png", "pack1");
 
-    ResourcePack pack(_tmpDir);
+    AssetManager pack(_tmpDir);
     pack.addPack(pack1);
     EXPECT_FALSE(pack.movePackUp(pack1));
 }
 
-TEST_F(ResourcePackTest, MovePackDownAlreadyLowest) {
+TEST_F(AssetManagerTest, MovePackDownAlreadyLowest) {
     auto pack1 = _tmpDir / "pack1";
     auto dir1 = pack1 / "assets" / "noix" / "textures";
     std::filesystem::create_directories(dir1);
     writeText(dir1 / "stone.png", "pack1");
 
-    ResourcePack pack(_tmpDir);
+    AssetManager pack(_tmpDir);
     pack.addPack(pack1);
     EXPECT_FALSE(pack.movePackDown(pack1));
 }
 
-TEST_F(ResourcePackTest, MovePackNotFound) {
-    ResourcePack pack(_tmpDir);
+TEST_F(AssetManagerTest, MovePackNotFound) {
+    AssetManager pack(_tmpDir);
     EXPECT_FALSE(pack.movePackUp(_tmpDir / "nonexistent"));
     EXPECT_FALSE(pack.movePackDown(_tmpDir / "nonexistent"));
 }
 
-TEST_F(ResourcePackTest, ListPacks) {
+TEST_F(AssetManagerTest, ListPacks) {
     auto pack1 = _tmpDir / "pack1";
     auto pack2 = _tmpDir / "pack2";
     std::filesystem::create_directories(pack1 / "assets");
     std::filesystem::create_directories(pack2 / "assets");
 
-    ResourcePack pack(_tmpDir);
+    AssetManager pack(_tmpDir);
     pack.addPack(pack1);
     pack.addPack(pack2);
     EXPECT_EQ(pack.packCount(), 2u);

@@ -28,8 +28,6 @@ add_subdirectory(third_party/SDL_net)
 add_executable(noix-engine
     src/main.cpp
     src/core/ArgsParser.cpp
-    src/core/Config.cpp
-    src/core/ConfigManager.cpp
     src/core/Logger.cpp
     src/core/NamespacedId.cpp
     src/core/Sink.cpp
@@ -44,9 +42,10 @@ add_executable(noix-engine
     src/debug/DapServer.cpp
     src/debug/DebugServer.cpp
     src/debug/ScriptCallbackCommand.cpp
-    src/resource/ResourcePack.cpp
     src/runtime/Application.cpp
-    src/runtime/Locale.cpp
+    src/runtime/AssetManager.cpp
+    src/runtime/ConfigManager.cpp
+    src/runtime/LocaleManager.cpp
     src/runtime/SaveManager.cpp
     src/script/NativeModules.cpp
     src/script/modules/LoggerModule.cpp

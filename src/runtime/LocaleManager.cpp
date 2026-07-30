@@ -1,12 +1,12 @@
 /*
- * Locale — Internationalization (i18n) support for the engine.
+ * LocaleManager — Internationalization (i18n) support for the engine.
  *
  * Loads .lang files from ResourcePack, respecting pack overlay priority.
  * Higher-priority pack entries override lower-priority ones.
  */
 
-#include "runtime/Locale.h"
-#include "resource/ResourcePack.h"
+#include "runtime/LocaleManager.h"
+#include "runtime/AssetManager.h"
 #include "core/Logger.h"
 
 #include <filesystem>
@@ -15,37 +15,35 @@
 
 namespace noix::runtime {
 
-Locale& Locale::instance() {
-    static Locale locale;
-    return locale;
+LocaleManager::LocaleManager(AssetManager* assets)
+    : _assets(assets) {}
+
+void LocaleManager::setAssetManager(AssetManager* assets) {
+    _assets = assets;
 }
 
-void Locale::setResourcePack(resource::ResourcePack* pack) {
-    _pack = pack;
-}
-
-void Locale::setLang(const std::string& lang) {
+void LocaleManager::setLang(const std::string& lang) {
     _lang = lang;
     loadTranslations();
 }
 
-void Locale::addNamespace(const std::string& ns) {
+void LocaleManager::addNamespace(const std::string& ns) {
     _namespaces.insert(ns);
     if (!_lang.empty()) loadTranslations();
 }
 
-void Locale::removeNamespace(const std::string& ns) {
+void LocaleManager::removeNamespace(const std::string& ns) {
     _namespaces.erase(ns);
     if (!_lang.empty()) loadTranslations();
 }
 
-void Locale::reset() {
+void LocaleManager::reset() {
     _lang.clear();
     _namespaces.clear();
     _translations.clear();
 }
 
-std::string Locale::i18n(const std::string& key, const std::string& defaultValue) const {
+std::string LocaleManager::i18n(const std::string& key, const std::string& defaultValue) const {
     auto id = core::NamespacedId::parse(key);
     auto it = _translations.find(id);
     if (it != _translations.end()) {
@@ -54,16 +52,16 @@ std::string Locale::i18n(const std::string& key, const std::string& defaultValue
     return defaultValue;
 }
 
-void Locale::loadTranslations() {
+void LocaleManager::loadTranslations() {
     _translations.clear();
 
-    if (!_pack || _lang.empty()) return;
+    if (!_assets || _lang.empty()) return;
 
     /* Build the relative path inside a namespace: "i18n/<locale>.lang" */
     std::string langResource = "i18n/" + _lang + ".lang";
 
-    auto packs = _pack->listPacks();
-    auto defaultPath = _pack->defaultPath();
+    auto packs = _assets->listPacks();
+    auto defaultPath = _assets->defaultPath();
 
     /* Collect all pack roots in low→high priority order.
        defaultPath is lowest, then user packs in their listed order. */
@@ -101,11 +99,11 @@ void Locale::loadTranslations() {
         }
     }
 
-    core::Logger::instance().info("Locale: loaded {} translations for '{}'",
+    core::Logger::instance().info("LocaleManager: loaded {} translations for '{}'",
                                    _translations.size(), _lang);
 }
 
-void Locale::parseLangFile(const std::filesystem::path& path, const std::string& ns) {
+void LocaleManager::parseLangFile(const std::filesystem::path& path, const std::string& ns) {
     std::ifstream file(path);
     if (!file.is_open()) return;
 

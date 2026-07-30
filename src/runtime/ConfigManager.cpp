@@ -1,10 +1,10 @@
-#include "core/ConfigManager.h"
+#include "runtime/ConfigManager.h"
 #include "core/Logger.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
-namespace noix::core {
+namespace noix::runtime {
 
 ConfigManager::ConfigManager(const std::filesystem::path& configDir)
     : _configDir(configDir) {}
@@ -13,25 +13,25 @@ ConfigManager::~ConfigManager() {
     _entries.clear();
 }
 
-std::filesystem::path ConfigManager::entryPath(const NamespacedId& id) const {
+std::filesystem::path ConfigManager::entryPath(const core::NamespacedId& id) const {
     return _configDir / id.ns() / (id.name() + ".json");
 }
 
-void ConfigManager::saveToDisk(const NamespacedId& id,
+void ConfigManager::saveToDisk(const core::NamespacedId& id,
                                const std::filesystem::path& path) {
     std::string json;
     {
         std::lock_guard lock(_mutex);
         auto it = _entries.find(id);
         if (it == _entries.end()) return;
-        json = it->second.config.toJson();
+        json = it->second.config.dump();
     }
 
     std::filesystem::create_directories(path.parent_path());
 
     std::ofstream file(path);
     if (!file.is_open()) {
-        Logger::instance().error("Failed to write config file: {}", path.string());
+        core::Logger::instance().error("Failed to write config file: {}", path.string());
         return;
     }
     file << json;
@@ -46,21 +46,21 @@ void ConfigManager::saveToDisk(const NamespacedId& id,
 
 // --- 查询 ---
 
-bool ConfigManager::has(const NamespacedId& id) const {
+bool ConfigManager::has(const core::NamespacedId& id) const {
     std::lock_guard lock(_mutex);
     return _entries.find(id) != _entries.end();
 }
 
-Config ConfigManager::get(const NamespacedId& id) const {
+core::Value ConfigManager::get(const core::NamespacedId& id) const {
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
-    if (it == _entries.end()) return Config(Value());
+    if (it == _entries.end()) return core::Value();
     return it->second.config;
 }
 
-std::vector<NamespacedId> ConfigManager::list() const {
+std::vector<core::NamespacedId> ConfigManager::list() const {
     std::lock_guard lock(_mutex);
-    std::vector<NamespacedId> result;
+    std::vector<core::NamespacedId> result;
     result.reserve(_entries.size());
     for (const auto& [id, _] : _entries) {
         result.push_back(id);
@@ -68,16 +68,16 @@ std::vector<NamespacedId> ConfigManager::list() const {
     return result;
 }
 
-Config ConfigManager::getOrDefault(const NamespacedId& id, const Config& defaultCfg) {
+core::Value ConfigManager::getOrDefault(const core::NamespacedId& id, const core::Value& defaultVal) {
     std::filesystem::path path;
     {
         std::lock_guard lock(_mutex);
         auto it = _entries.find(id);
         if (it != _entries.end()) return it->second.config;
 
-        _entries.emplace(id, Entry{Config(defaultCfg), true});
+        _entries.emplace(id, Entry{core::Value(defaultVal), true});
         path = entryPath(id);
-        Logger::instance().info("Created default config: {}:{}", id.ns(), id.name());
+        core::Logger::instance().info("Created default config: {}:{}", id.ns(), id.name());
     }
     saveToDisk(id, path);
     return get(id);
@@ -85,31 +85,25 @@ Config ConfigManager::getOrDefault(const NamespacedId& id, const Config& default
 
 // --- 创建/写入 ---
 
-void ConfigManager::set(const NamespacedId& id, Config cfg) {
+void ConfigManager::set(const core::NamespacedId& id, core::Value val) {
     std::filesystem::path path;
     {
         std::lock_guard lock(_mutex);
         auto it = _entries.find(id);
         if (it != _entries.end()) {
-            it->second.config = std::move(cfg);
+            it->second.config = std::move(val);
             it->second.dirty = true;
         } else {
-            _entries.emplace(id, Entry{std::move(cfg), true});
+            _entries.emplace(id, Entry{std::move(val), true});
         }
         path = entryPath(id);
     }
     saveToDisk(id, path);
 }
 
-Config ConfigManager::fromJson(const std::string& json) {
-    Value data = Value::parse(json);
-    if (data.isNull()) data = Value::object();
-    return Config(std::move(data));
-}
-
 // --- 删除 ---
 
-bool ConfigManager::remove(const NamespacedId& id) {
+bool ConfigManager::remove(const core::NamespacedId& id) {
     std::filesystem::path path;
     {
         std::lock_guard lock(_mutex);
@@ -126,17 +120,17 @@ bool ConfigManager::remove(const NamespacedId& id) {
 
 // --- 磁盘 I/O ---
 
-bool ConfigManager::load(const NamespacedId& id) {
+bool ConfigManager::load(const core::NamespacedId& id) {
     auto path = entryPath(id);
 
     if (!std::filesystem::exists(path)) {
-        Logger::instance().info("Config file not found: {}", path.string());
+        core::Logger::instance().info("Config file not found: {}", path.string());
         return false;
     }
 
     std::ifstream file(path);
     if (!file.is_open()) {
-        Logger::instance().error("Failed to open config file: {}", path.string());
+        core::Logger::instance().error("Failed to open config file: {}", path.string());
         return false;
     }
 
@@ -144,28 +138,28 @@ bool ConfigManager::load(const NamespacedId& id) {
     buf << file.rdbuf();
     std::string content = buf.str();
 
-    Value data = Value::parse(content);
+    core::Value data = core::Value::parse(content);
     if (data.isNull()) {
-        Logger::instance().error("Failed to parse config file {}", path.string());
+        core::Logger::instance().error("Failed to parse config file {}", path.string());
         return false;
     }
 
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
     if (it != _entries.end()) {
-        it->second.config = Config(std::move(data));
+        it->second.config = std::move(data);
         it->second.dirty = false;
     } else {
-        _entries.emplace(id, Entry{Config(std::move(data)), false});
+        _entries.emplace(id, Entry{std::move(data), false});
     }
 
-    Logger::instance().info("Loaded config: {}:{}", id.ns(), id.name());
+    core::Logger::instance().info("Loaded config: {}:{}", id.ns(), id.name());
     return true;
 }
 
 int ConfigManager::loadAll() {
     if (!std::filesystem::exists(_configDir)) {
-        Logger::instance().info("Config directory not found: {}", _configDir.string());
+        core::Logger::instance().info("Config directory not found: {}", _configDir.string());
         return 0;
     }
 
@@ -179,17 +173,17 @@ int ConfigManager::loadAll() {
             if (fileEntry.path().extension() != ".json") continue;
 
             std::string name = fileEntry.path().stem().string();
-            if (load(NamespacedId(ns, name))) {
+            if (load(core::NamespacedId(ns, name))) {
                 ++count;
             }
         }
     }
 
-    Logger::instance().info("ConfigManager: loaded {} config(s) from {}", count, _configDir.string());
+    core::Logger::instance().info("ConfigManager: loaded {} config(s) from {}", count, _configDir.string());
     return count;
 }
 
-bool ConfigManager::save(const NamespacedId& id) {
+bool ConfigManager::save(const core::NamespacedId& id) {
     std::lock_guard lock(_mutex);
     auto it = _entries.find(id);
     if (it == _entries.end()) return false;
@@ -202,7 +196,7 @@ bool ConfigManager::save(const NamespacedId& id) {
 }
 
 int ConfigManager::saveAll() {
-    std::vector<std::pair<NamespacedId, std::filesystem::path>> toSave;
+    std::vector<std::pair<core::NamespacedId, std::filesystem::path>> toSave;
     {
         std::lock_guard lock(_mutex);
         for (auto& [id, entry] : _entries) {
@@ -219,9 +213,9 @@ int ConfigManager::saveAll() {
     }
 
     if (count > 0) {
-        Logger::instance().info("ConfigManager: saved {} config(s)", count);
+        core::Logger::instance().info("ConfigManager: saved {} config(s)", count);
     }
     return count;
 }
 
-} // namespace noix::core
+} // namespace noix::runtime

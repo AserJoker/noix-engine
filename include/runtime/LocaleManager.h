@@ -1,16 +1,13 @@
 #pragma once
 
 /*
- * Locale — Internationalization (i18n) support for the engine.
+ * LocaleManager — Internationalization (i18n) support for the engine.
  *
  * Loads language files from ResourcePack, respecting pack overlay priority.
  * Language keys inherit the namespace of their source file:
  *   key "system.window.title" in "noix:i18n/en_US.lang" → "noix:system.window.title"
  *
- * Usage:
- *   Locale::instance().setResourcePack(&pack);
- *   Locale::instance().setLang("en_US");
- *   std::string title = Locale::instance().i18n("noix:system.window.title", "fallback");
+ * Owned by Application, accessed via Application::instance().localeManager().
  */
 
 #include "core/NamespacedId.h"
@@ -20,16 +17,16 @@
 #include <set>
 #include <string>
 
-namespace noix::resource { class ResourcePack; }
-
 namespace noix::runtime {
 
-class Locale {
-public:
-    static Locale& instance();
+class AssetManager;
 
-    /// Set the ResourcePack used to resolve .lang files.
-    void setResourcePack(resource::ResourcePack* pack);
+class LocaleManager {
+public:
+    explicit LocaleManager(AssetManager* assets);
+
+    /// Set the AssetManager used to resolve .lang files.
+    void setAssetManager(AssetManager* assets);
 
     /// Set the current locale (e.g., "en_US") and reload translations.
     void setLang(const std::string& lang);
@@ -55,15 +52,13 @@ public:
     std::string i18n(const std::string& key, const std::string& defaultValue = "") const;
 
 private:
-    Locale() = default;
-
     /// Load all .lang files for the current locale from all resource packs.
     void loadTranslations();
 
     /// Parse a single .lang file. Keys are prefixed with the given namespace.
     void parseLangFile(const std::filesystem::path& path, const std::string& ns);
 
-    resource::ResourcePack* _pack = nullptr;
+    AssetManager* _assets = nullptr;
     std::string _lang;
     std::set<std::string> _namespaces;
     std::map<core::NamespacedId, std::string> _translations;
