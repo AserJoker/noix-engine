@@ -14,7 +14,8 @@
     "paths": {
       "noix:logger": ["./scripts/noix-modules/logger"],
       "noix:debug": ["./scripts/noix-modules/debug"],
-      "noix:locale": ["./scripts/noix-modules/locale"]
+      "noix:locale": ["./scripts/noix-modules/locale"],
+      "noix:config": ["./scripts/noix-modules/config"]
     }
   },
   "include": ["scripts"]

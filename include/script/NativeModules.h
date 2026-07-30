@@ -13,5 +13,6 @@ void registerNativeModules(JSContext* ctx, ScriptEngine* engine);
 void registerLoggerModule(JSContext* ctx);
 void registerDebugModule(JSContext* ctx);
 void registerLocaleModule(JSContext* ctx);
+void registerConfigModule(JSContext* ctx);
 
 } // namespace noix::script
