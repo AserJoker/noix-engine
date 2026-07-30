@@ -17,6 +17,7 @@
 
 #include <filesystem>
 #include <map>
+#include <set>
 #include <string>
 
 namespace noix::resource { class ResourcePack; }
@@ -36,7 +37,17 @@ public:
     /// Get the current locale string.
     const std::string& lang() const { return _lang; }
 
-    /// Reset all state — clear translations and locale.
+    /// Add a namespace to the whitelist. If non-empty, only these namespaces
+    /// are loaded during setLang(). Triggers a reload if a locale is active.
+    void addNamespace(const std::string& ns);
+
+    /// Remove a namespace from the whitelist. Triggers a reload if a locale is active.
+    void removeNamespace(const std::string& ns);
+
+    /// Get the current namespace whitelist (empty = load all namespaces).
+    const std::set<std::string>& namespaces() const { return _namespaces; }
+
+    /// Reset all state — clear translations, locale, and namespace whitelist.
     void reset();
 
     /// Look up a translation by fully-qualified key (e.g., "noix:system.window.title").
@@ -54,6 +65,7 @@ private:
 
     resource::ResourcePack* _pack = nullptr;
     std::string _lang;
+    std::set<std::string> _namespaces;
     std::map<core::NamespacedId, std::string> _translations;
 };
 

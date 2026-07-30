@@ -25,6 +25,21 @@ export function setLang(lang: string): void;
 export function getLang(): string;
 
 /**
- * Reset all locale state — clears translations and the current locale string.
+ * Add a namespace to the whitelist. When non-empty, only namespaces in the
+ * whitelist are loaded during setLang(). Triggers a reload if a locale is active.
+ *
+ * @param ns - Namespace name, e.g. "noix", "mymod"
+ */
+export function addNamespace(ns: string): void;
+
+/**
+ * Remove a namespace from the whitelist. Triggers a reload if a locale is active.
+ *
+ * @param ns - Namespace name to remove
+ */
+export function removeNamespace(ns: string): void;
+
+/**
+ * Reset all locale state — clears translations, locale, and namespace whitelist.
  */
 export function reset(): void;

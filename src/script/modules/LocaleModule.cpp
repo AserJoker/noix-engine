@@ -46,16 +46,36 @@ static JSValue locale_getLang(JSContext* ctx, JSValueConst, int, JSValueConst*) 
     return JS_NewStringLen(ctx, lang.c_str(), lang.size());
 }
 
+static JSValue locale_addNamespace(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_ThrowTypeError(ctx, "addNamespace requires 1 argument (namespace)");
+    const char* ns = JS_ToCString(ctx, argv[0]);
+    if (!ns) return JS_EXCEPTION;
+    Locale::instance().addNamespace(ns);
+    JS_FreeCString(ctx, ns);
+    return JS_UNDEFINED;
+}
+
+static JSValue locale_removeNamespace(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_ThrowTypeError(ctx, "removeNamespace requires 1 argument (namespace)");
+    const char* ns = JS_ToCString(ctx, argv[0]);
+    if (!ns) return JS_EXCEPTION;
+    Locale::instance().removeNamespace(ns);
+    JS_FreeCString(ctx, ns);
+    return JS_UNDEFINED;
+}
+
 static JSValue locale_reset(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     Locale::instance().reset();
     return JS_UNDEFINED;
 }
 
 static int locale_module_init(JSContext* ctx, JSModuleDef* m) {
-    JS_SetModuleExport(ctx, m, "i18n",     JS_NewCFunction(ctx, locale_i18n,     "i18n",     2));
-    JS_SetModuleExport(ctx, m, "setLang",  JS_NewCFunction(ctx, locale_setLang,  "setLang",  1));
-    JS_SetModuleExport(ctx, m, "getLang",  JS_NewCFunction(ctx, locale_getLang,  "getLang",  0));
-    JS_SetModuleExport(ctx, m, "reset",    JS_NewCFunction(ctx, locale_reset,    "reset",    0));
+    JS_SetModuleExport(ctx, m, "i18n",           JS_NewCFunction(ctx, locale_i18n,           "i18n",           2));
+    JS_SetModuleExport(ctx, m, "setLang",         JS_NewCFunction(ctx, locale_setLang,        "setLang",         1));
+    JS_SetModuleExport(ctx, m, "getLang",         JS_NewCFunction(ctx, locale_getLang,        "getLang",         0));
+    JS_SetModuleExport(ctx, m, "addNamespace",    JS_NewCFunction(ctx, locale_addNamespace,   "addNamespace",    1));
+    JS_SetModuleExport(ctx, m, "removeNamespace", JS_NewCFunction(ctx, locale_removeNamespace,"removeNamespace", 1));
+    JS_SetModuleExport(ctx, m, "reset",           JS_NewCFunction(ctx, locale_reset,          "reset",           0));
     return 0;
 }
 
@@ -72,6 +92,8 @@ void registerLocaleModule(JSContext* ctx) {
     JS_AddModuleExport(ctx, m, "i18n");
     JS_AddModuleExport(ctx, m, "setLang");
     JS_AddModuleExport(ctx, m, "getLang");
+    JS_AddModuleExport(ctx, m, "addNamespace");
+    JS_AddModuleExport(ctx, m, "removeNamespace");
     JS_AddModuleExport(ctx, m, "reset");
 }
 

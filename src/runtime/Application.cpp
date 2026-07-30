@@ -152,6 +152,7 @@ void Application::initResourcePack() {
 
     /* Initialize Locale with the resource pack for i18n support */
     runtime::Locale::instance().setResourcePack(_resourcePack.get());
+    runtime::Locale::instance().addNamespace("noix");
     runtime::Locale::instance().setLang("en_US");
 }
 

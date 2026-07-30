@@ -29,8 +29,19 @@ void Locale::setLang(const std::string& lang) {
     loadTranslations();
 }
 
+void Locale::addNamespace(const std::string& ns) {
+    _namespaces.insert(ns);
+    if (!_lang.empty()) loadTranslations();
+}
+
+void Locale::removeNamespace(const std::string& ns) {
+    _namespaces.erase(ns);
+    if (!_lang.empty()) loadTranslations();
+}
+
 void Locale::reset() {
     _lang.clear();
+    _namespaces.clear();
     _translations.clear();
 }
 
@@ -48,42 +59,46 @@ void Locale::loadTranslations() {
 
     if (!_pack || _lang.empty()) return;
 
-    /* Build the resource name for the lang file: "i18n/<locale>.lang" */
+    /* Build the relative path inside a namespace: "i18n/<locale>.lang" */
     std::string langResource = "i18n/" + _lang + ".lang";
 
-    /* Iterate all packs in low→high priority order.
-       Parse each pack's lang file; higher-priority entries overwrite
-       lower-priority ones. */
     auto packs = _pack->listPacks();
     auto defaultPath = _pack->defaultPath();
 
-    /* Collect all paths that contain the lang file, in low→high priority */
-    std::vector<std::pair<std::filesystem::path, std::string>> paths;
+    /* Collect all pack roots in low→high priority order.
+       defaultPath is lowest, then user packs in their listed order. */
+    std::vector<std::filesystem::path> roots;
+    roots.push_back(defaultPath);
+    for (const auto& p : packs) roots.push_back(p);
 
-    /* Default path (lowest priority) */
-    auto relPath = std::filesystem::path("assets") / langResource;
-    for (const auto& entry : std::filesystem::directory_iterator(defaultPath)) {
-        if (!entry.is_directory()) continue;
-        auto candidate = entry.path() / relPath;
-        if (std::filesystem::exists(candidate)) {
-            paths.emplace_back(candidate, entry.path().filename().string());
-        }
-    }
-
-    /* User packs (in order, lowest first) */
-    for (const auto& packRoot : packs) {
-        for (const auto& entry : std::filesystem::directory_iterator(packRoot)) {
-            if (!entry.is_directory()) continue;
-            auto candidate = entry.path() / relPath;
-            if (std::filesystem::exists(candidate)) {
-                paths.emplace_back(candidate, entry.path().filename().string());
+    /* Build namespace list: use explicit whitelist if non-empty,
+       otherwise auto-discover by scanning assets/ in all pack roots. */
+    std::vector<std::string> nsList;
+    if (!_namespaces.empty()) {
+        nsList.assign(_namespaces.begin(), _namespaces.end());
+    } else {
+        std::set<std::string> discovered;
+        for (const auto& root : roots) {
+            auto assetsDir = root / "assets";
+            if (!std::filesystem::exists(assetsDir)) continue;
+            for (const auto& nsDir : std::filesystem::directory_iterator(assetsDir)) {
+                if (nsDir.is_directory()) {
+                    discovered.insert(nsDir.path().filename().string());
+                }
             }
         }
+        nsList.assign(discovered.begin(), discovered.end());
     }
 
-    /* Parse in order — later entries (higher priority) overwrite earlier ones */
-    for (auto& [path, ns] : paths) {
-        parseLangFile(path, ns);
+    /* For each namespace, walk pack roots in low→high priority order.
+       Higher-priority packs overwrite lower-priority entries. */
+    for (const auto& ns : nsList) {
+        for (const auto& root : roots) {
+            auto candidate = root / "assets" / ns / langResource;
+            if (std::filesystem::exists(candidate)) {
+                parseLangFile(candidate, ns);
+            }
+        }
     }
 
     core::Logger::instance().info("Locale: loaded {} translations for '{}'",
