@@ -10,7 +10,7 @@
 #include <csignal>
 
 namespace noix::debug { class DebugServer; class DapServer; }
-namespace noix::runtime { class AssetManager; class ConfigManager; class LocaleManager; class SaveManager; }
+namespace noix::runtime { class AssetManager; class ConfigManager; class EventBus; class LocaleManager; class SaveManager; }
 namespace noix::script { class ScriptEngine; }
 
 struct SDL_Window;
@@ -66,6 +66,7 @@ public:
     LocaleManager& localeManager() const { return *_localeManager; }
     SaveManager& saveManager() const { return *_saveManager; }
     script::ScriptEngine& scriptEngine() const { return *_scriptEngine; }
+    EventBus& eventBus() const { return *_eventBus; }
 
 private:
     bool initCore();
@@ -81,6 +82,7 @@ private:
     std::unique_ptr<ConfigManager> _configManager;
     std::unique_ptr<debug::DebugServer> _debugServer;
     std::unique_ptr<debug::DapServer> _dapServer;
+    std::unique_ptr<EventBus> _eventBus;
     std::unique_ptr<AssetManager> _assetManager;
     std::unique_ptr<LocaleManager> _localeManager;
     std::unique_ptr<SaveManager> _saveManager;
@@ -91,6 +93,7 @@ private:
     uint32_t _shutdownEventType = 0;
     uint32_t _freezeEventType = 0;
     uint32_t _resumeEventType = 0;
+    uint32_t _eventBusEventType = 0;
     RunMode _runMode = RunMode::Full;
     bool _sdlInitialized = false;
     bool _cleanedUp = false;

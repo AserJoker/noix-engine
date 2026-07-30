@@ -15,5 +15,6 @@ void registerDebugModule(JSContext* ctx);
 void registerLocaleModule(JSContext* ctx);
 void registerConfigModule(JSContext* ctx);
 void registerSaveModule(JSContext* ctx);
+void registerEventBusModule(JSContext* ctx);
 
 } // namespace noix::script

@@ -16,6 +16,7 @@
       "noix:debug": ["./scripts/noix-modules/debug"],
       "noix:locale": ["./scripts/noix-modules/locale"],
       "noix:config": ["./scripts/noix-modules/config"],
+      "noix:eventbus": ["./scripts/noix-modules/eventbus"],
       "noix:save": ["./scripts/noix-modules/save"]
     }
   },

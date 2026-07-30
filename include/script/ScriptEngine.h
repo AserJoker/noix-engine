@@ -24,6 +24,8 @@ namespace noix::debug {
     class DebugServer;
 }
 
+namespace noix::runtime { class EventBus; }
+
 namespace noix::script {
 
 class ScriptEngine {
@@ -64,6 +66,12 @@ public:
 
     /// Get DebugServer
     debug::DebugServer* debugServer() const { return _debugServer; }
+
+    /// Set EventBus back-pointer (call before start)
+    void setEventBus(runtime::EventBus* bus) { _eventBus = bus; }
+
+    /// Get EventBus
+    runtime::EventBus* eventBus() const { return _eventBus; }
 
     /// Set debug freeze/resume SDL event types
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
@@ -115,6 +123,9 @@ private:
 
     /// DebugServer back-pointer
     debug::DebugServer* _debugServer = nullptr;
+
+    /// EventBus back-pointer
+    runtime::EventBus* _eventBus = nullptr;
 
     /// Named JS callbacks (owned by ScriptEngine, guarded by _callbacksMutex)
     std::map<std::string, CallbackEntry> _callbacks;

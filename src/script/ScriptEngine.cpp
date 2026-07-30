@@ -1,9 +1,14 @@
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "script/ScriptEngine.h"
 #include "debug/DapBridge.h"
 #include "debug/DebugServer.h"
 #include "debug/commands/ScriptCallbackCommand.h"
 #include "core/Logger.h"
 #include "core/Value.h"
+#include "runtime/EventBus.h"
 #include "script/NativeModules.h"
 
 #include "quickjs.h"
@@ -239,6 +244,11 @@ noix::core::Value ScriptEngine::invokeCallback(const std::string& name, const no
 }
 
 void ScriptEngine::releaseCallbacks() {
+    /* Release EventBus listeners first (same thread: script thread) */
+    if (_eventBus) {
+        _eventBus->releaseAllListeners();
+    }
+
     std::map<std::string, CallbackEntry> callbacks;
     {
         std::lock_guard lock(_callbacksMutex);

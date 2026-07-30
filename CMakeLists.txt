@@ -43,6 +43,7 @@ add_executable(noix-engine
     src/debug/DebugServer.cpp
     src/debug/ScriptCallbackCommand.cpp
     src/runtime/Application.cpp
+    src/runtime/EventBus.cpp
     src/runtime/AssetManager.cpp
     src/runtime/ConfigManager.cpp
     src/runtime/LocaleManager.cpp
@@ -53,6 +54,7 @@ add_executable(noix-engine
     src/script/modules/LocaleModule.cpp
     src/script/modules/ConfigModule.cpp
     src/script/modules/SaveModule.cpp
+    src/script/modules/EventBusModule.cpp
     src/script/ScriptEngine.cpp
 )
 

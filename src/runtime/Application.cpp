@@ -3,6 +3,7 @@
 #include "core/Value.h"
 #include "runtime/AssetManager.h"
 #include "runtime/ConfigManager.h"
+#include "runtime/EventBus.h"
 #include "runtime/LocaleManager.h"
 #include "runtime/SaveManager.h"
 #include "core/Logger.h"
@@ -170,6 +171,13 @@ void Application::initDebugServer() {
     _scriptEngine = std::make_unique<script::ScriptEngine>(_basePath);
     _scriptEngine->setDebugEventTypes(_freezeEventType, _resumeEventType);
 
+    /* EventBus — event dispatch via SDL custom events */
+    _eventBusEventType = SDL_RegisterEvents(1);
+    _eventBus = std::make_unique<EventBus>();
+    _eventBus->setEventType(_eventBusEventType);
+    _eventBus->setScriptEngine(_scriptEngine.get());
+    _scriptEngine->setEventBus(_eventBus.get());
+
     /* DapServer — DAP protocol debug server (TCP only) */
     uint16_t dapPort = 0;
     if (_args.has("dap-port")) dapPort = static_cast<uint16_t>(std::stoi(_args.get("dap-port")));
@@ -262,6 +270,7 @@ int Application::run() {
             else if (event.type == _shutdownEventType) _running.store(false);
             else if (event.type == _freezeEventType) _frozen.store(true);
             else if (event.type == _resumeEventType) _frozen.store(false);
+            else if (event.type == _eventBusEventType) _eventBus->handleSdlEvent(event);
         }
         if (!_frozen.load()) {
             // 游戏逻辑刻（未来）
@@ -287,6 +296,7 @@ void Application::cleanup() {
     _saveManager.reset();
     _assetManager.reset();
     _scriptEngine.reset();
+    _eventBus.reset();
     if (_configManager) {
         _configManager->saveAll();
         _configManager.reset();
