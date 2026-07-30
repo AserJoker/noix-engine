@@ -1,4 +1,6 @@
 #include "runtime/Application.h"
+#include "core/NamespacedId.h"
+#include "core/Value.h"
 #include "runtime/AssetManager.h"
 #include "runtime/ConfigManager.h"
 #include "runtime/LocaleManager.h"
