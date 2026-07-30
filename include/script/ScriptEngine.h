@@ -82,9 +82,6 @@ public:
     /// Load and execute a script file on the script thread (for mod index execution)
     void loadScriptAsync(const std::string& path);
 
-    /// Load and execute a script string on the script thread (for import statements)
-    void loadScriptStringAsync(const std::string& code, const std::string& filename);
-
     /// Set debug freeze/resume SDL event types
     void setDebugEventTypes(uint32_t freezeType, uint32_t resumeType);
 
@@ -142,8 +139,9 @@ private:
     /// Module resolver (maps module name -> file path)
     ModuleResolver _moduleResolver;
 
-    // Allow moduleLoader to access _moduleResolver
+    // Allow moduleLoader and moduleNormalize to access _moduleResolver
     friend JSModuleDef* moduleLoader(JSContext*, const char*, void*);
+    friend char* moduleNormalize(JSContext*, const char*, const char*, void*);
 
     /// Named JS callbacks (owned by ScriptEngine, guarded by _callbacksMutex)
     std::map<std::string, CallbackEntry> _callbacks;

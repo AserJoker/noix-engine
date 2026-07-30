@@ -14,6 +14,7 @@
 #include "quickjs.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <filesystem>
 
 namespace noix::script {
 
@@ -24,24 +25,53 @@ static int jsInterruptHandler(JSRuntime *rt, void *opaque) {
     return engine->isRunning() ? 0 : 1;
 }
 
-/* Module loader: resolves module imports.
-   - Relative imports (./ ../): resolve against scriptsPath
-   - Module resolver callback: maps bare module names to file paths (e.g. mod names)
-   - Falls back to treating the name as a file path */
+/* Module normalize: resolves module names to absolute paths.
+   - Relative imports (./ ../): resolve against the importing module's directory
+   - Bare names: resolved via ModuleResolver callback (e.g. mod names → absolute paths)
+   - Falls back to the bare name as-is (for native modules like noix:logger)
+   The returned string is allocated with JS_Malloc; caller frees with js_free. */
+static char* moduleNormalize(JSContext* ctx, const char* base_cname,
+                             const char* cname1, void* opaque) {
+    auto* engine = static_cast<ScriptEngine*>(opaque);
+    std::string name(cname1);
+
+    /* Relative imports: resolve against base module's directory */
+    if (name.starts_with("./") || name.starts_with("../")) {
+        std::filesystem::path basePath(base_cname);
+        auto resolved = (basePath.parent_path() / name).lexically_normal();
+        std::string result = resolved.string();
+        std::replace(result.begin(), result.end(), '\\', '/');
+        char* cstr = static_cast<char*>(js_malloc(ctx, result.size() + 1));
+        if (!cstr) return nullptr;
+        memcpy(cstr, result.c_str(), result.size() + 1);
+        return cstr;
+    }
+
+    /* Try ModuleResolver for bare module names (e.g. mod names) */
+    if (engine->_moduleResolver) {
+        std::string resolved = engine->_moduleResolver(name);
+        if (!resolved.empty()) {
+            std::replace(resolved.begin(), resolved.end(), '\\', '/');
+            char* cstr = static_cast<char*>(js_malloc(ctx, resolved.size() + 1));
+            if (!cstr) return nullptr;
+            memcpy(cstr, resolved.c_str(), resolved.size() + 1);
+            return cstr;
+        }
+    }
+
+    /* Fallback: bare name as-is (for native modules like noix:logger) */
+    char* cstr = static_cast<char*>(js_malloc(ctx, name.size() + 1));
+    if (!cstr) return nullptr;
+    memcpy(cstr, name.c_str(), name.size() + 1);
+    return cstr;
+}
+
+/* Module loader: loads and compiles a module file.
+   module_name is already normalized (absolute path for file modules,
+   bare name for native modules which are handled before this callback). */
 static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* opaque) {
     auto* engine = static_cast<ScriptEngine*>(opaque);
     std::string path(module_name);
-
-    /* Relative imports: resolve against scriptsPath */
-    if (path.starts_with("./") || path.starts_with("../")) {
-        path = engine->scriptsPath() + "/" + path;
-    } else if (engine->_moduleResolver) {
-        /* Try module resolver for bare module names (e.g. mod names) */
-        std::string resolved = engine->_moduleResolver(module_name);
-        if (!resolved.empty()) {
-            path = resolved;
-        }
-    }
 
     /* Read file */
     FILE* f = fopen(path.c_str(), "rb");
@@ -56,8 +86,8 @@ static JSModuleDef* moduleLoader(JSContext* ctx, const char* module_name, void* 
     fread(buf.data(), 1, len, f);
     fclose(f);
 
-    /* Compile and instantiate the module.
-       Only add JS_EVAL_FLAG_DEBUG_INFO when DAP bridge is present. */
+    /* Compile the module. Use the normalized name (absolute path) as filename
+       so QuickJS caches the module under its absolute path. */
     int evalFlags = JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY;
     if (engine->dapBridge()) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
     JSValue func = JS_Eval(ctx, buf.c_str(), buf.size(), module_name, evalFlags);
@@ -313,8 +343,8 @@ void ScriptEngine::initQuickJS() {
     /* Register native modules */
     registerNativeModules(_ctx, this);
 
-    /* Set up module loader */
-    JS_SetModuleLoaderFunc(_rt, nullptr, moduleLoader, this);
+    /* Set up module loader with custom normalize function */
+    JS_SetModuleLoaderFunc(_rt, moduleNormalize, moduleLoader, this);
 }
 
 void ScriptEngine::scriptThreadFunc() {
@@ -361,45 +391,29 @@ bool ScriptEngine::loadScript(const std::string& path) {
     fread(buf.data(), 1, len, f);
     fclose(f);
 
+    /* Normalize path to forward slashes for consistent QuickJS module caching */
+    std::string normalizedPath = path;
+    std::replace(normalizedPath.begin(), normalizedPath.end(), '\\', '/');
+
     /* Only enable debug info when DAP bridge is present. Without DAP,
        JS_EVAL_FLAG_DEBUG_INFO can cause the script to pause on debugger
        statements with no way to resume — leading to a deadlock. */
     int evalFlags = JS_EVAL_TYPE_MODULE;
     if (_dapBridge) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
 
-    JSValue result = JS_Eval(_ctx, buf.c_str(), buf.size(), path.c_str(), evalFlags);
+    JSValue result = JS_Eval(_ctx, buf.c_str(), buf.size(), normalizedPath.c_str(), evalFlags);
     if (JS_IsException(result)) {
         JSValue exc = JS_GetException(_ctx);
         const char* msg = JS_ToCString(_ctx, exc);
         core::Logger::instance().error("ScriptEngine: error loading '{}': {}",
-                                        path, msg ? msg : "unknown");
+                                        normalizedPath, msg ? msg : "unknown");
         JS_FreeCString(_ctx, msg);
         JS_FreeValue(_ctx, exc);
         return false;
     }
     JS_FreeValue(_ctx, result);
-    core::Logger::instance().info("ScriptEngine: loaded '{}'", path);
+    core::Logger::instance().info("ScriptEngine: loaded '{}'", normalizedPath);
     return true;
-}
-
-void ScriptEngine::loadScriptStringAsync(const std::string& code, const std::string& filename) {
-    postTask([this, code, filename]() {
-        int evalFlags = JS_EVAL_TYPE_MODULE;
-        if (_dapBridge) evalFlags |= JS_EVAL_FLAG_DEBUG_INFO;
-
-        JSValue result = JS_Eval(_ctx, code.c_str(), code.size(), filename.c_str(), evalFlags);
-        if (JS_IsException(result)) {
-            JSValue exc = JS_GetException(_ctx);
-            const char* msg = JS_ToCString(_ctx, exc);
-            core::Logger::instance().error("ScriptEngine: error loading '{}': {}",
-                                            filename, msg ? msg : "unknown");
-            JS_FreeCString(_ctx, msg);
-            JS_FreeValue(_ctx, exc);
-        } else {
-            JS_FreeValue(_ctx, result);
-            core::Logger::instance().info("ScriptEngine: loaded '{}'", filename);
-        }
-    });
 }
 
 } // namespace noix::script

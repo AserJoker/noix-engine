@@ -285,16 +285,13 @@ void ModManager::applyToAssetManager() {
 void ModManager::loadMods(noix::script::ScriptEngine& engine) {
     auto enabled = enabledModsInLoadOrder();
 
-    // Load each enabled mod's index as a module import.
-    // The import statement uses the mod name, which moduleLoader resolves to the
-    // actual file. We use a synthetic filename (e.g. "<mod-load-name>") for the
-    // eval context to avoid name collision with the module being imported.
+    // Load each enabled mod's index script in dependency order.
+    // The absolute path serves as the QuickJS module cache key, so
+    // import "modname" from other modules resolves to the same cached module.
     for (auto& name : enabled) {
         auto indexPath = resolveModIndex(name);
         if (indexPath) {
-            std::string importCode = "import \"" + name + "\";";
-            std::string evalName = "<mod-load-" + name + ">";
-            engine.loadScriptStringAsync(importCode, evalName);
+            engine.loadScriptAsync(indexPath->string());
         }
     }
 
