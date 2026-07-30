@@ -3,10 +3,13 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include "core/ArgsParser.h"
 
+#include <SDL3/SDL.h>
 #include <csignal>
 
 namespace noix::debug { class DebugServer; class DapServer; }
@@ -77,6 +80,9 @@ private:
     void rotateLogs(const std::filesystem::path& logsDir);
     void cleanup();
 
+    using EventHandler = std::function<void(const SDL_Event&)>;
+    void registerEventHandler(uint32_t eventType, EventHandler handler);
+
     core::ArgsParser _args;
     std::string _basePath;
     std::unique_ptr<ConfigManager> _configManager;
@@ -90,10 +96,7 @@ private:
     SDL_Window* _window = nullptr;
     std::atomic<bool> _running{false};
     std::atomic<bool> _frozen{false};
-    uint32_t _shutdownEventType = 0;
-    uint32_t _freezeEventType = 0;
-    uint32_t _resumeEventType = 0;
-    uint32_t _eventBusEventType = 0;
+    std::unordered_map<uint32_t, EventHandler> _eventHandlers;
     RunMode _runMode = RunMode::Full;
     bool _sdlInitialized = false;
     bool _cleanedUp = false;
