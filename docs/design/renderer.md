@@ -31,26 +31,26 @@
   Script Thread: EventBus callbacks → push Request (SPSC ring queue)
 ```
 
-### 渲染对象
+### 可渲染对象（Renderable）
 
-- 主线程维护一组**渲染对象**（RenderObject），每个对应一个可绘制的视觉实体
-- 每帧遍历所有 RenderObject，生成 GPU 渲染指令（绑定管线、设置参数、绘制），最后提交
-- RenderObject 持有 GPU 资源引用（pipeline、texture、vertex buffer 等），可直接用于命令录制
+- 主线程维护一组**渲染对象**（Renderable），每个对应一个可绘制的视觉实体
+- 每帧遍历所有 Renderable，生成 GPU 渲染指令（绑定管线、设置参数、绘制），最后提交
+- Renderable 持有 GPU 资源引用（pipeline、texture、vertex buffer 等），可直接用于命令录制
 
-### 渲染分组（RenderBatch）
+### 绘制批次（DrawBatch）
 
-- RenderObject 按渲染特征**分组存储**，减少管线切换和状态变更
+- Renderable 按渲染特征**分组存储**，减少管线切换和状态变更
 - 分组维度：
   - **Material**：相同材质的对象归为一组，管线/纹理/uniform 一次绑定
   - **透明/不透明**：不透明组先绘制（可乱序），透明组后绘制（需按深度排序）
 - 同组内连续录制命令，GPU 状态切换最少化
-- 分组在 RenderProxy 消费时动态维护：RenderObject 创建/更新时自动归入对应分组
+- 分组在 RenderProxy 消费时动态维护：Renderable 创建/更新时自动归入对应分组
 
 ### 纹理图集（TextureAtlas）
 
 - 小纹理（UI 图标、Tile、Sprite 动画帧等）合并为**纹理图集**，减少纹理切换
 - 图集在资源加载阶段由外部工具或运行时打包生成
-- 使用图集的 RenderObject 通过 UV 偏移和缩放定位子纹理
+- 使用图集的 Renderable 通过 UV 偏移和缩放定位子纹理
 - 同一图集内的对象可共享同一个纹理绑定，减少 DrawCall
 
 ### 合批绘制（Instancing / Batched Draw）
@@ -110,7 +110,7 @@ Offscreen Pipeline:
 - 每个 Pass 声明：
   - **输入**：依赖的纹理/buffer（上一 Pass 的输出）
   - **输出**：颜色目标 + 可选深度模板目标
-  - **执行体**：遍历哪些 RenderBatch 组，如何录制命令
+  - **执行体**：遍历哪些 DrawBatch 组，如何录制命令
 - Pass 之间通过 offscreen texture 传递数据
 - Pass 的执行顺序由流水线定义，Scene 依次执行
 
@@ -128,7 +128,7 @@ Offscreen Pipeline:
   ```
 - 默认使用内置 Forward Pipeline
 
-- RenderProxy 设计延后：先实现正确的 RenderObject，根据实现反馈调整设计后再定义 RenderProxy schema
+- RenderProxy 设计延后：先实现正确的 Renderable，根据实现反馈调整设计后再定义 RenderProxy schema
 
 ### 资源管理
 
@@ -184,7 +184,7 @@ Renderer::render():
 - 存储已创建的 `SDL_GPUGraphicsPipeline`
 - 管线创建开销大，缓存后同配置的管线只创建一次
 - 外部在合适时机**批量创建/重置**管线缓存（如场景切换、资源配置变更时）
-- RenderObject 引用管线缓存中的 pipeline 句柄，不自行创建管线
+- Renderable 引用管线缓存中的 pipeline 句柄，不自行创建管线
 - **Shader 管线通过 NamespacedId 加载**：如 `noix:opaque-sprite`，从 AssetManager 解析对应的 SPIR-V 资源
 
 #### 纹理缓存（TextureCache）
@@ -199,7 +199,7 @@ Renderer::render():
 - 网格（模型）也是资源，按 NamespacedId 索引和缓存
 - 存储 `SDL_GPUBuffer`（Vertex + Index Buffer），首次使用时从 AssetManager 加载并上传 GPU
 - 与纹理/管线一致的生命周期管理：预加载、卸载、场景切换时清理
-- 合批时：在 RenderObject 生命周期变更（创建/销毁）时进行顶点合并，合并后的结果存在渲染队列中
+- 合批时：在 Renderable 生命周期变更（创建/销毁）时进行顶点合并，合并后的结果存在渲染队列中
 - 暂时只内置 `noix:builtin-quad`
 
 #### 材质（Material）
@@ -207,15 +207,15 @@ Renderer::render():
 - 材质 = 管线 + 纹理绑定 + uniform 参数的组合描述
 - 材质定义了"用什么管线、贴什么纹理、传什么参数"
 - **材质通过 NamespacedId 加载**：如 `noix:mat-player`，从 AssetManager 解析材质定义文件（JSON）
-- RenderObject 引用材质，而非直接引用管线和纹理
+- Renderable 引用材质，而非直接引用管线和纹理
 - 材质是渲染分组的关键维度：相同材质的对象天然在同一分组
 
-#### RenderObject 自定义 Uniform
+#### Renderable 自定义 Uniform
 
-- RenderObject 可携带**自定义 uniform 数据**，在材质 uniform 之上覆盖/扩展
+- Renderable 可携带**自定义 uniform 数据**，在材质 uniform 之上覆盖/扩展
 - 分为两级：
   - **材质级 uniform**：材质定义中的默认值，同材质所有对象共享
-  - **对象级 uniform**：RenderObject 自身携带，按对象覆盖（如 tint 颜色、UV 偏移、动画参数等）
+  - **对象级 uniform**：Renderable 自身携带，按对象覆盖（如 tint 颜色、UV 偏移、动画参数等）
 - 渲染时：先绑定材质级 uniform，再覆盖对象级 uniform
 - 对象级 uniform 通过 RenderProxy 从 Logic Thread 传递
 
@@ -300,7 +300,7 @@ Shader管线定义文件 (assets/noix/pipelines/opaque-sprite.json):
 文字渲染流程:
   Font(NamespacedId) + Text → SDL_TTF → SDF Glyph Texture → TextureAtlas(字形图集)
                                                           ↓
-  Material(pipeline: custom-sdf-shader, texture: glyph_atlas) → RenderObject
+  Material(pipeline: custom-sdf-shader, texture: glyph_atlas) → Renderable
 
 自定义文字效果:
   外部只需编写新的 Fragment Shader，在 Material 中引用即可:

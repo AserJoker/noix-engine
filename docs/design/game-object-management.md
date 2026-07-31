@@ -147,7 +147,7 @@ System 执行流程:
 - RenderProxy 只包含渲染所需数据（Transform 位置、Sprite 纹理引用等），不含逻辑字段
 - RenderProxy 压入 **RenderProxyBuffer**（三缓冲环形队列）
 - Render Thread 每帧从缓冲中读取最新一帧的 RenderProxy，更新自己维护的**渲染对象队列**
-- 渲染对象队列由 Render Thread 独占，无需加锁
+- Renderable 队列由 Render Thread 独占，无需加锁
 - **latest wins 降级**：渲染消费慢时，Logic 丢弃旧帧写入最新状态，Render 始终读到最近完整快照
 
 ### RenderProxy（渲染代理）
