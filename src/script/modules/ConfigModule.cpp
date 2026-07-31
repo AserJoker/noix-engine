@@ -1,6 +1,7 @@
 #include "script/NativeModules.h"
 #include "runtime/Application.h"
 #include "runtime/ConfigManager.h"
+#include "script/ScriptEngine.h"
 #include "core/Logger.h"
 #include "core/NamespacedId.h"
 #include "core/Value.h"
@@ -18,19 +19,6 @@ static ConfigManager& getMgr() {
     return Application::instance().configManager();
 }
 
-static std::string jsToJson(JSContext* ctx, JSValueConst val) {
-    JSValue jsonVal = JS_JSONStringify(ctx, val, JS_UNDEFINED, JS_UNDEFINED);
-    if (JS_IsException(jsonVal)) return "";
-
-    size_t len;
-    const char* cstr = JS_ToCStringLen(ctx, &len, jsonVal);
-    std::string result;
-    if (cstr) result.assign(cstr, len);
-    JS_FreeCString(ctx, cstr);
-    JS_FreeValue(ctx, jsonVal);
-    return result;
-}
-
 static JSValue config_get(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 2) return JS_ThrowTypeError(ctx, "get requires 2 arguments (id, defaultValue)");
 
@@ -40,14 +28,10 @@ static JSValue config_get(JSContext* ctx, JSValueConst, int argc, JSValueConst* 
     auto id = NamespacedId::parse(idStr);
     JS_FreeCString(ctx, idStr);
 
-    std::string json = jsToJson(ctx, argv[1]);
-    if (json.empty()) return JS_EXCEPTION;
-
-    Value defaultVal = Value::parse(json);
+    Value defaultVal = noix::script::ScriptEngine::jsValueToValue(ctx, argv[1]);
     Value cfg = getMgr().getOrDefault(id, defaultVal);
 
-    std::string resultJson = cfg.dump();
-    return JS_ParseJSON(ctx, resultJson.c_str(), resultJson.size(), "<config>");
+    return noix::script::ScriptEngine::valueToJsValue(ctx, cfg);
 }
 
 static JSValue config_set(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -59,10 +43,7 @@ static JSValue config_set(JSContext* ctx, JSValueConst, int argc, JSValueConst* 
     auto id = NamespacedId::parse(idStr);
     JS_FreeCString(ctx, idStr);
 
-    std::string json = jsToJson(ctx, argv[1]);
-    if (json.empty()) return JS_EXCEPTION;
-
-    Value val = Value::parse(json);
+    Value val = noix::script::ScriptEngine::jsValueToValue(ctx, argv[1]);
     getMgr().set(id, std::move(val));
 
     return JS_UNDEFINED;

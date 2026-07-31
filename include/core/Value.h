@@ -108,6 +108,10 @@ public:
     // Deserialization — uses cJSON internally, returns Value
     static Value parse(const std::string& json);
 
+    // Type discrimination for int vs double (both satisfy isNumber())
+    bool isInt() const { return std::holds_alternative<int>(_data); }
+    bool isDouble() const { return std::holds_alternative<double>(_data); }
+
 private:
     std::variant<std::monostate, bool, int, double, std::string,
                  std::map<std::string, Value>, std::vector<Value>> _data;

@@ -12,18 +12,6 @@ using noix::runtime::ModManager;
 
 namespace {
 
-static std::string jsToJson(JSContext* ctx, JSValueConst val) {
-    JSValue jsonVal = JS_JSONStringify(ctx, val, JS_UNDEFINED, JS_UNDEFINED);
-    if (JS_IsException(jsonVal)) return "";
-    size_t len;
-    const char* cstr = JS_ToCStringLen(ctx, &len, jsonVal);
-    std::string result;
-    if (cstr) result.assign(cstr, len);
-    JS_FreeCString(ctx, cstr);
-    JS_FreeValue(ctx, jsonVal);
-    return result;
-}
-
 static JSValue modmanager_listMods(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     auto* engine = static_cast<noix::script::ScriptEngine*>(
         JS_GetRuntimeOpaque(JS_GetRuntime(ctx)));

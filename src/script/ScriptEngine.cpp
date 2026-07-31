@@ -218,14 +218,12 @@ noix::core::Value ScriptEngine::invokeCallback(const std::string& name, const no
     postTask([&, entry]() {
         JSValue jsCallback = JS_MKPTR(JS_TAG_OBJECT, entry.callback);
 
-        /* Convert request Value to a JS object via JSON parse */
-        std::string requestJson = request.dump();
-        JSValue argv[] = { JS_ParseJSON(entry.ctx, requestJson.c_str(), requestJson.size(), "<request>") };
+        /* Convert request Value → JSValue directly (no JSON intermediary) */
+        JSValue argv[] = { valueToJsValue(entry.ctx, request) };
         JSValue jsResult = JS_Call(entry.ctx, jsCallback, JS_UNDEFINED, 1, argv);
         JS_FreeValue(entry.ctx, argv[0]);
 
-        /* Convert JS result back to Value.
-           Accepts both objects (JSON.stringify internally) and strings. */
+        /* Convert JS result → Value directly */
         core::Value responseValue;
         if (JS_IsException(jsResult)) {
             JSValue exc = JS_GetException(entry.ctx);
@@ -233,32 +231,13 @@ noix::core::Value ScriptEngine::invokeCallback(const std::string& name, const no
             responseValue = core::Value::object({{"error", core::Value(err ? err : "script exception")}});
             if (err) JS_FreeCString(entry.ctx, err);
             JS_FreeValue(entry.ctx, exc);
-        } else if (JS_IsString(jsResult)) {
-            const char* s = JS_ToCString(entry.ctx, jsResult);
-            if (s) {
-                responseValue = core::Value::parse(std::string(s));
-                JS_FreeCString(entry.ctx, s);
-            }
-            if (responseValue.isNull()) {
-                responseValue = core::Value::object();
-            }
-        } else if (!JS_IsUndefined(jsResult) && !JS_IsNull(jsResult)) {
-            /* Object/array/number/bool — stringify then parse to Value */
-            JSValue jsonStr = JS_JSONStringify(entry.ctx, jsResult, JS_UNDEFINED, JS_UNDEFINED);
-            if (JS_IsString(jsonStr)) {
-                const char* s = JS_ToCString(entry.ctx, jsonStr);
-                if (s) {
-                    responseValue = core::Value::parse(std::string(s));
-                    JS_FreeCString(entry.ctx, s);
-                }
-            }
-            JS_FreeValue(entry.ctx, jsonStr);
-            if (responseValue.isNull()) {
-                responseValue = core::Value::object();
-            }
-        } else {
-            /* undefined/null return — empty object */
+        } else if (JS_IsUndefined(jsResult) || JS_IsNull(jsResult)) {
             responseValue = core::Value::object();
+        } else {
+            responseValue = jsValueToValue(entry.ctx, jsResult);
+            if (responseValue.isNull()) {
+                responseValue = core::Value::object();
+            }
         }
         JS_FreeValue(entry.ctx, jsResult);
 
@@ -279,6 +258,118 @@ noix::core::Value ScriptEngine::invokeCallback(const std::string& name, const no
     }
 
     return result;
+}
+
+/* ---- JSValue ↔ Value direct conversion ---- */
+
+core::Value ScriptEngine::jsValueToValue(JSContext* ctx, const JSValue& val) {
+    if (JS_IsUndefined(val) || JS_IsNull(val)) {
+        return core::Value();
+    }
+    if (JS_IsBool(val)) {
+        return core::Value(JS_ToBool(ctx, val) != 0);
+    }
+    if (JS_IsNumber(val)) {
+        /* QuickJS stores small integers as tagged int32 internally.
+           Try int32 first; if lossless, store as int. Otherwise use double. */
+        int32_t i;
+        if (JS_ToInt32(ctx, &i, val) == 0) {
+            double d;
+            JS_ToFloat64(ctx, &d, val);
+            if (d == static_cast<double>(i)) {
+                return core::Value(i);
+            }
+            return core::Value(d);
+        }
+        double d;
+        JS_ToFloat64(ctx, &d, val);
+        return core::Value(d);
+    }
+    if (JS_IsString(val)) {
+        size_t len;
+        const char* s = JS_ToCStringLen(ctx, &len, val);
+        std::string result(s ? s : "", len);
+        JS_FreeCString(ctx, s);
+        return core::Value(std::move(result));
+    }
+    if (JS_IsArray(val)) {
+        auto arr = core::Value::array();
+        auto& vec = arr.asArray();
+        JSValue lenVal = JS_GetPropertyStr(ctx, val, "length");
+        int32_t len = 0;
+        if (JS_IsNumber(lenVal)) {
+            JS_ToInt32(ctx, &len, lenVal);
+        }
+        JS_FreeValue(ctx, lenVal);
+        for (int32_t i = 0; i < len; i++) {
+            JSValue elem = JS_GetPropertyInt64(ctx, val, i);
+            vec.push_back(jsValueToValue(ctx, elem));
+            JS_FreeValue(ctx, elem);
+        }
+        return arr;
+    }
+    /* Object (non-array, non-function) */
+    if (JS_IsObject(val) && !JS_IsFunction(ctx, val)) {
+        auto obj = core::Value::object();
+        auto& map = obj.asObject();
+        JSPropertyEnum* props = nullptr;
+        uint32_t propCount = 0;
+        if (JS_GetOwnPropertyNames(ctx, &props, &propCount, val,
+                                   JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+            for (uint32_t i = 0; i < propCount; i++) {
+                const char* key = JS_AtomToCString(ctx, props[i].atom);
+                JSValue propVal = JS_GetProperty(ctx, val, props[i].atom);
+                if (key) {
+                    map.emplace(key, jsValueToValue(ctx, propVal));
+                    JS_FreeCString(ctx, key);
+                }
+                JS_FreeValue(ctx, propVal);
+                JS_FreeAtom(ctx, props[i].atom);
+            }
+            js_free(ctx, props);
+        }
+        return obj;
+    }
+
+    /* Fallback: function, symbol, etc. — return null */
+    return core::Value();
+}
+
+JSValue ScriptEngine::valueToJsValue(JSContext* ctx, const core::Value& val) {
+    if (val.isNull()) {
+        return JS_NULL;
+    }
+    if (val.isBool()) {
+        return JS_NewBool(ctx, val.asBool());
+    }
+    if (val.isNumber()) {
+        if (val.isInt()) {
+            return JS_NewInt32(ctx, val.asInt());
+        }
+        return JS_NewFloat64(ctx, val.asDouble());
+    }
+    if (val.isString()) {
+        const auto& s = val.asString();
+        return JS_NewStringLen(ctx, s.c_str(), s.size());
+    }
+    if (val.isArray()) {
+        const auto& vec = val.asArray();
+        JSValue arr = JS_NewArray(ctx);
+        for (size_t i = 0; i < vec.size(); i++) {
+            JS_SetPropertyUint32(ctx, arr, static_cast<uint32_t>(i),
+                                 valueToJsValue(ctx, vec[i]));
+        }
+        return arr;
+    }
+    if (val.isObject()) {
+        const auto& map = val.asObject();
+        JSValue obj = JS_NewObject(ctx);
+        for (const auto& [key, v] : map) {
+            JS_SetPropertyStr(ctx, obj, key.c_str(), valueToJsValue(ctx, v));
+        }
+        return obj;
+    }
+    return JS_NULL;
 }
 
 void ScriptEngine::releaseCallbacks() {

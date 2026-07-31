@@ -104,6 +104,14 @@ public:
     /// Release all stored JS callbacks on the script thread (called during reset/shutdown).
     void releaseCallbacks();
 
+    /// Direct JSValue → Value conversion (no JSON string intermediary).
+    /// Must be called from the script thread. Handles null/bool/int/double/string/array/object.
+    static noix::core::Value jsValueToValue(JSContext* ctx, const JSValue& val);
+
+    /// Direct Value → JSValue conversion (no JSON string intermediary).
+    /// Must be called from the script thread. Caller owns the returned JSValue.
+    static JSValue valueToJsValue(JSContext* ctx, const noix::core::Value& val);
+
 private:
     void scriptThreadFunc();
     bool loadScript(const std::string& path);

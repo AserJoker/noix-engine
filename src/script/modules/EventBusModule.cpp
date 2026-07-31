@@ -59,15 +59,7 @@ static JSValue eventbus_emit(JSContext* ctx, JSValueConst, int argc, JSValueCons
 
     noix::core::Value data;
     if (argc >= 2) {
-        JSValue jsonVal = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
-        if (JS_IsString(jsonVal)) {
-            const char* s = JS_ToCString(ctx, jsonVal);
-            if (s) {
-                data = noix::core::Value::parse(std::string(s));
-                JS_FreeCString(ctx, s);
-            }
-        }
-        JS_FreeValue(ctx, jsonVal);
+        data = noix::script::ScriptEngine::jsValueToValue(ctx, argv[1]);
     }
     if (data.isNull()) data = noix::core::Value::object();
 
