@@ -114,11 +114,11 @@ Offscreen Pipeline:
 - Pass 之间通过 offscreen texture 传递数据
 - Pass 的执行顺序由流水线定义，Scene 依次执行
 
-#### 自定义流水线
+#### 渲染图（RenderGraph）
 
-- 外部可通过 API 组装自定义流水线：
+- 外部可通过 API 组装 RenderGraph：
   ```
-  scene->setPipeline(CustomPipeline()
+  renderer->setRenderGraph(RenderGraph()
       .addPass("shadow",  output: shadow_map)
       .addPass("gbuffer", output: [albedo, normal, depth])
       .addPass("lighting", input: [albedo, normal, depth, shadow_map], output: lit_color)
@@ -257,7 +257,7 @@ Shader管线定义文件 (assets/noix/pipelines/opaque-sprite.json):
   "topology": "triangle_list"
 }
 
-渲染流水线定义文件 (assets/noix/render_pipelines/forward.json):
+RenderGraph 定义文件 (assets/noix/render_graphs/forward.json):
 {
   "passes": [
     { "name": "opaque", "target": "swapchain", "sort": "none" },
@@ -274,7 +274,7 @@ Shader管线定义文件 (assets/noix/pipelines/opaque-sprite.json):
 
 | NamespacedId | 类型 | 用途 |
 |---|---|---|
-| `noix:builtin-forward` | RenderPipeline | 默认前向渲染流水线 |
+| `noix:builtin-forward` | RenderGraph | 默认前向渲染图 |
 | `noix:builtin-sprite` | Pipeline | 2D 精灵渲染管线 |
 | `noix:builtin-sprite.vert` | Shader | 2D 精灵顶点着色器 |
 | `noix:builtin-sprite.frag` | Shader | 2D 精灵片段着色器 |
@@ -313,7 +313,7 @@ Shader管线定义文件 (assets/noix/pipelines/opaque-sprite.json):
 
 ```
 NamespacedId → AssetManager → 资源文件 → 解析 → GPU 对象
-  noix:forward-pipeline   → forward.json   → RenderPipeline
+  noix:forward-render-graph → forward.json → RenderGraph
   noix:opaque-sprite      → opaque-sprite.json → SDL_GPUGraphicsPipeline
   noix:mat-player         → mat-player.json → Material
   noix:player-sprite      → player.png     → SDL_GPUTexture
