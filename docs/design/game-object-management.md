@@ -128,17 +128,18 @@ System 执行流程:
 └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
        │                    │                     │
        │  CommandBuffer     │  RenderProxyBuffer  │
-       │  (ring, spinlock)  │  (ring, latest-wins)│
+       │  (SPSC, spinlock)  │  (ring, latest-wins)│
        └────────────────────┘                     │
                             └────────────────────┘
 ```
 
 ### Script Thread ↔ Logic Thread 协调
 
-- 双缓冲环形队列 CommandBuffer，Script 写 / Logic 读
-- **帧边界 atomic swap**：Logic 帧开始时 swap 读写端
-- **不可丢弃事件**：缓冲满时脚本端原子变量自旋锁（spinlock）短暂等待，直到 Logic 消费腾出空间
-- 无条件变量 / 无内核态切换
+- **Lock-free SPSC 环形队列**，Script 随时写 / Logic 按 tick 消费
+- 脚本无帧概念，Request 离散生成（事件驱动），Logic 按 tick drain 自上次以来累积的所有 Request
+- Script 端：原子写入 + 推进 write_index，**满则 spinlock 等待**（事件不可丢弃）
+- Logic 端：tick 开始时读 read_index → write_index 之间所有条目，推进 read_index
+- 不需要 swap、不需要双缓冲，环形队列天然异步
 
 ### Logic Thread ↔ Render Thread 协调
 
@@ -164,8 +165,7 @@ System 执行流程:
 
 ```
 World::tick():
-  1. swap CommandBuffer (atomic)
-  2. drain CommandBuffer:
+  1. drain CommandBuffer (SPSC, read_index → write_index):
      - 数据变更类 Request → 直接 apply 到 Storage
      - System驱动类 Request → 按类型分发给对应 System
   3. for system in systems (by priority):
@@ -181,8 +181,8 @@ World::tick():
                     ─────────────                    ────────────              ─────────────
 
   ┌─────────┐    ┌──────────────┐                   ┌──────────┐
-  │  Event   │───▶│    Script    │──▶ cmdBuf(ring) ──▶│  World   │──▶ Storage
-  │  (SDL /  │    │  callbacks   │    atomic swap     │  tick()  │
+  │  Event   │───▶│    Script    │──▶ cmdBuf(SPSC) ──▶│  World   │──▶ Storage
+  │  (SDL /  │    │  callbacks   │    discrete push   │  tick()  │
   │  EventBus)│    │  ecs.request │                   └─────┬────┘
   └─────────┘    └──────────────┘                          │
                                                      ┌──────┴──────┐
@@ -268,7 +268,7 @@ Archetype [Transform, Sprite]:
 | 4 | 嵌套 Component / entity_ref | 不支持，完全扁平化 | Component 只有原始类型字段，保持简单 |
 | 5 | 字符串存储 | 尽量少用，必要时字符串池 + ref | O(1) 访问，行存储定长 |
 | 5b | 字段名句柄化 | Schema 注册时分配 FieldHandle，运行时 handle→offset→内存访问 | 避免字符串匹配，O(1) |
-| 6 | Script ↔ Logic 同步 | 双缓冲环形队列 + atomic swap + spinlock 降级 | 无条件变量，无内核切换；事件不可丢弃，满时自旋等待 |
+| 6 | Script ↔ Logic 同步 | Lock-free SPSC 环形队列，无 swap | 脚本离散生成 Request，Logic 按 tick drain；满时 spinlock |
 | 7 | RenderProxy 策略 | 全局增量，局部全量 | Logic 只推变更对象；每个对象完整快照；Render 按 id 替换 |
 | 9 | System 驱动模型 | Request 驱动，脚本绑定 FieldHandle | System 不感知 Component，脚本通过 Request 映射数据来源+定义遍历范围 |
 
