@@ -9,15 +9,7 @@ namespace noix::video {
 bool Renderer::init(SDL_Window* window) {
     _window = window;
 
-    /* Prefer SPIR-V (Vulkan), fallback to whatever is available */
-    SDL_GPUShaderFormat formats = SDL_GPU_SHADERFORMAT_SPIRV;
-#ifdef _WIN32
-    formats |= SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_DXIL;
-#elif defined(__APPLE__)
-    formats |= SDL_GPU_SHADERFORMAT_MSL;
-#endif
-
-    _device = SDL_CreateGPUDevice(formats, true, nullptr);
+    _device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
     if (!_device) {
         core::Logger::instance().error("Renderer: SDL_CreateGPUDevice failed: {}", SDL_GetError());
         return false;
