@@ -24,6 +24,20 @@ add_subdirectory(third_party/cJSON)
 set(SDLNET_SAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/SDL_net)
 
+# ---- SDL3_image ----
+set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/SDL_image)
+
+# ---- SDL3_ttf ----
+set(SDLTTF_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
+set(SDLTTF_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(SDLTTF_PLUTOSVG OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/SDL_ttf)
+
+# ---- GLM ----
+add_subdirectory(third_party/glm)
+
 # ---- noix-engine ----
 add_executable(noix-engine
     src/main.cpp
@@ -72,6 +86,9 @@ target_include_directories(noix-engine PRIVATE
 target_link_libraries(noix-engine PRIVATE
     SDL3::SDL3
     SDL3_net::SDL3_net
+    SDL3_image::SDL3_image
+    SDL3_ttf::SDL3_ttf
+    glm::glm
     qjs
     cjson
 )
