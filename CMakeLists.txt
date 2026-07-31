@@ -1,4 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
+
+# CMake 4.x on Windows with Clang requires RC compiler (freetype's ftver.rc)
+if(CMAKE_C_COMPILER MATCHES "clang" AND NOT DEFINED CMAKE_RC_COMPILER)
+    get_filename_component(_clang_bin "${CMAKE_C_COMPILER}" DIRECTORY)
+    find_program(LLVM_RC llvm-rc HINTS "${_clang_bin}" NO_DEFAULT_PATH)
+    if(LLVM_RC)
+        set(CMAKE_RC_COMPILER "${LLVM_RC}" CACHE FILEPATH "RC compiler" FORCE)
+    endif()
+    unset(_clang_bin)
+endif()
+
 project(noix-engine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)

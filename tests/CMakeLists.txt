@@ -41,6 +41,24 @@ set_target_properties(test_unit test_integration PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist
 )
 
+# ---- Copy runtime DLLs alongside test executables ----
+add_custom_command(TARGET test_unit POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:SDL3::SDL3>
+        ${CMAKE_SOURCE_DIR}/dist
+    COMMENT "Copy SDL3.dll to dist for test_unit"
+)
+add_custom_command(TARGET test_integration POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:SDL3::SDL3>
+        ${CMAKE_SOURCE_DIR}/dist
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:SDL3_net::SDL3_net>
+        ${CMAKE_SOURCE_DIR}/dist
+    COMMENT "Copy runtime DLLs to dist for test_integration"
+)
+
 include(GoogleTest)
-gtest_discover_tests(test_unit)
-gtest_discover_tests(test_integration)
+# PRE_TEST discovery avoids DLL-not-found during first build (DLLs copied at POST_BUILD)
+gtest_discover_tests(test_unit DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(test_integration DISCOVERY_MODE PRE_TEST)
