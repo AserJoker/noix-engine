@@ -77,7 +77,7 @@ core::Value ConfigManager::getOrDefault(const core::NamespacedId& id, const core
 
         _entries.emplace(id, Entry{core::Value(defaultVal), true});
         path = entryPath(id);
-        core::Logger::instance().info("Created default config: {}:{}", id.ns(), id.name());
+        core::Logger::instance().debug("Created default config: {}:{}", id.ns(), id.name());
     }
     saveToDisk(id, path);
     return get(id);
@@ -124,7 +124,7 @@ bool ConfigManager::load(const core::NamespacedId& id) {
     auto path = entryPath(id);
 
     if (!std::filesystem::exists(path)) {
-        core::Logger::instance().info("Config file not found: {}", path.string());
+        core::Logger::instance().debug("Config file not found: {}", path.string());
         return false;
     }
 
@@ -153,13 +153,13 @@ bool ConfigManager::load(const core::NamespacedId& id) {
         _entries.emplace(id, Entry{std::move(data), false});
     }
 
-    core::Logger::instance().info("Loaded config: {}:{}", id.ns(), id.name());
+    core::Logger::instance().debug("Loaded config: {}:{}", id.ns(), id.name());
     return true;
 }
 
 int ConfigManager::loadAll() {
     if (!std::filesystem::exists(_configDir)) {
-        core::Logger::instance().info("Config directory not found: {}", _configDir.string());
+        core::Logger::instance().debug("Config directory not found: {}", _configDir.string());
         return 0;
     }
 

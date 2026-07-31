@@ -160,7 +160,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
     cJSON *result = cJSON_CreateArray();
 
     std::string clientPath(path ? path : "");
-    core::Logger::instance().info("[DAP] handleSetBreakpoints: clientPath='{}', numBreakpoints={}",
+    core::Logger::instance().debug("[DAP] handleSetBreakpoints: clientPath='{}', numBreakpoints={}",
                                     clientPath, requestedBps.size());
 
     if (rt) {
@@ -180,7 +180,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
             for (auto &req : requestedBps) {
                 int jsLine;
                 std::string jsFile = resolveBreakpointPath(clientPath, req.line, jsLine);
-                core::Logger::instance().info("[DAP] resolveBreakpointPath: tsPath='{}' tsLine={} → jsFile='{}' jsLine={}",
+                core::Logger::instance().debug("[DAP] resolveBreakpointPath: tsPath='{}' tsLine={} → jsFile='{}' jsLine={}",
                                                 clientPath, req.originalLine, jsFile, jsLine);
                 if (!resolvedPath.empty() || jsFile != clientPath || jsLine != req.line) {
                     /* resolveBreakpointPath found a mapping */
@@ -218,7 +218,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
             /* Set new breakpoints */
             for (auto &req : requestedBps) {
                 uint32_t id;
-                core::Logger::instance().info("[DAP] setBreakpoint: file='{}' line={} condition='{}'",
+                core::Logger::instance().debug("[DAP] setBreakpoint: file='{}' line={} condition='{}'",
                                                 resolvedPath, req.line, req.condition);
                 if (!req.condition.empty()) {
                     id = JS_DebugSetConditionalBreakpoint(rt, resolvedPath.c_str(),
@@ -226,7 +226,7 @@ void DapBridge::handleSetBreakpoints(cJSON *args, int requestSeq) {
                 } else {
                     id = JS_DebugSetBreakpoint(rt, resolvedPath.c_str(), req.line);
                 }
-                core::Logger::instance().info("[DAP] setBreakpoint: result id={}", id);
+                core::Logger::instance().debug("[DAP] setBreakpoint: result id={}", id);
                 if (id > 0) {
                     Breakpoint b;
                     b.id = id;

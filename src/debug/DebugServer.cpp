@@ -141,7 +141,7 @@ void DebugServer::serverLoop() {
         NET_DestroyStreamSocket(client);
     }
 
-    core::Logger::instance().info("DebugServer: server thread exited");
+    core::Logger::instance().debug("DebugServer: server thread exited");
 }
 
 HandlerResult DebugServer::handleRequest(const std::string& path, const std::string& body) {

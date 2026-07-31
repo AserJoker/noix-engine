@@ -362,7 +362,7 @@ void ModManager::cascadeDisable(const std::string& name) {
         if (it != _pendingState.end() && it->second) {
             cascadeDisable(modName);
             _pendingState[modName] = false;
-            core::Logger::instance().info("ModManager: cascading disable '{}'", modName);
+            core::Logger::instance().debug("ModManager: cascading disable '{}'", modName);
         }
     }
 }

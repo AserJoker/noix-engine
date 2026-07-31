@@ -91,7 +91,7 @@ void DapBridge::onClientDisconnected() {
        must keep running — we only clean up the debug session.
 
        This method is idempotent — safe to call multiple times. */
-    core::Logger::instance().info("[DAP] onClientDisconnected: cleaning up debug session");
+    core::Logger::instance().debug("[DAP] onClientDisconnected: cleaning up debug session");
 
     /* 1. Reset session flags FIRST so debugCallback stops sending events.
        Setting launched=false prevents debugCallback from pushing freeze events
@@ -123,7 +123,7 @@ void DapBridge::onClientDisconnected() {
                After removing breakpoints and disabling callbacks,
                it won't pause again. */
             if (JS_DebugGetState(rt) != 0) {
-                core::Logger::instance().info("[DAP] onClientDisconnected: resuming paused script");
+                core::Logger::instance().debug("[DAP] onClientDisconnected: resuming paused script");
                 JS_DebugContinue(rt);
             }
         });
@@ -147,7 +147,7 @@ void DapBridge::onClientDisconnected() {
         cmdQueue.swap(empty);
     }
 
-    core::Logger::instance().info("[DAP] onClientDisconnected: done");
+    core::Logger::instance().debug("[DAP] onClientDisconnected: done");
 }
 
 /* ---- Core methods ---- */
@@ -294,7 +294,7 @@ void DapBridge::drainQueue(void *opaque) {
        it runs on the script thread, unlike DapServer::stop() which
        runs on the main thread. */
     if (self->shuttingDown.load()) {
-        core::Logger::instance().info("[DAP] drainQueue: shuttingDown detected, calling JS_DebugContinue");
+        core::Logger::instance().debug("[DAP] drainQueue: shuttingDown detected, calling JS_DebugContinue");
         if (self->rt) JS_DebugContinue(self->rt);
     }
 }
@@ -308,7 +308,7 @@ void DapBridge::debugCallback(JSRuntime *rt, JSDebugEventType event,
     /* If shutting down, immediately continue the script so the script
        thread can exit cleanly. */
     if (self->shuttingDown.load()) {
-        core::Logger::instance().info("[DAP] debugCallback: shuttingDown, calling JS_DebugContinue");
+        core::Logger::instance().debug("[DAP] debugCallback: shuttingDown, calling JS_DebugContinue");
         JS_DebugContinue(rt);
         return;
     }
@@ -460,27 +460,27 @@ std::string DapBridge::resolveBreakpointPath(const std::string &tsPath, int tsLi
     }
 
     std::string normTsPath = normalizePath(tsPath.c_str());
-    core::Logger::instance().info("[DAP] resolveBreakpointPath: normTsPath='{}', tsLine={}", normTsPath, tsLine);
+    core::Logger::instance().debug("[DAP] resolveBreakpointPath: normTsPath='{}', tsLine={}", normTsPath, tsLine);
 
     JSDebugScriptInfo *scripts = nullptr;
     int count = JS_DebugGetLoadedScripts(rt, &scripts);
-    core::Logger::instance().info("[DAP] resolveBreakpointPath: {} loaded scripts", count);
+    core::Logger::instance().debug("[DAP] resolveBreakpointPath: {} loaded scripts", count);
 
     for (int i = 0; i < count; i++) {
         if (!scripts[i].filename) continue;
         std::string jsPath = normalizePath(scripts[i].filename);
         SourceMap &smap = getSourceMap(jsPath);
-        core::Logger::instance().info("[DAP] resolveBreakpointPath: checking script '{}' smap.valid={}",
+        core::Logger::instance().debug("[DAP] resolveBreakpointPath: checking script '{}' smap.valid={}",
                                         scripts[i].filename, smap.isValid());
         if (!smap.isValid()) continue;
 
         for (int s = 0; s < smap.sourceCount(); s++) {
-            core::Logger::instance().info("[DAP] resolveBreakpointPath:   source[{}]='{}' vs normTsPath='{}'",
+            core::Logger::instance().debug("[DAP] resolveBreakpointPath:   source[{}]='{}' vs normTsPath='{}'",
                                             s, smap.sourcePath(s), normTsPath);
             if (smap.sourcePath(s) == normTsPath) {
                 int genLine = smap.generatedLine(tsLine);
                 outJsLine = (genLine > 0) ? genLine : tsLine;
-                core::Logger::instance().info("[DAP] resolveBreakpointPath: MATCH! jsFile='{}' jsLine={}",
+                core::Logger::instance().debug("[DAP] resolveBreakpointPath: MATCH! jsFile='{}' jsLine={}",
                                                 scripts[i].filename, outJsLine);
                 std::string result = scripts[i].filename;
                 if (scripts) JS_DebugFreeScriptInfo(rt, scripts, count);

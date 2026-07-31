@@ -44,7 +44,7 @@ void DapServer::start() {
 }
 
 void DapServer::stop() {
-    core::Logger::instance().info("DapServer::stop: begin");
+    core::Logger::instance().debug("DapServer::stop: begin");
     _bridge.shuttingDown = true;
 
     /* If the script thread is paused in a debug callback, nudge drainQueue
@@ -77,21 +77,21 @@ void DapServer::stop() {
     _bridge.cmdCv.notify_one();
     _bridge.reqCv.notify_one();
 
-    core::Logger::instance().info("DapServer::stop: joining reader thread...");
+    core::Logger::instance().debug("DapServer::stop: joining reader thread...");
     if (_readerThread.joinable()) {
         _readerThread.join();
     }
-    core::Logger::instance().info("DapServer::stop: reader thread joined");
+    core::Logger::instance().debug("DapServer::stop: reader thread joined");
 
-    core::Logger::instance().info("DapServer::stop: stopping handler thread...");
+    core::Logger::instance().debug("DapServer::stop: stopping handler thread...");
     _bridge.stopHandlerThread();
-    core::Logger::instance().info("DapServer::stop: handler thread stopped");
+    core::Logger::instance().debug("DapServer::stop: handler thread stopped");
 
     /* Resume the game loop in case it's frozen */
     _bridge.resumeGameLoop();
 
     NET_Quit();
-    core::Logger::instance().info("DapServer::stop: done");
+    core::Logger::instance().debug("DapServer::stop: done");
 }
 
 void DapServer::readerThreadFunc() {
@@ -100,7 +100,7 @@ void DapServer::readerThreadFunc() {
         /* Wait for a client connection */
         core::Logger::instance().info("DapServer: waiting for client on port {}...", _port);
         if (!_bridge.socket.acceptClient()) {
-            core::Logger::instance().info("DapServer: accept aborted (shutting down)");
+            core::Logger::instance().debug("DapServer: accept aborted (shutting down)");
             break;
         }
 
@@ -138,7 +138,7 @@ void DapServer::readerThreadFunc() {
         _bridge.onClientDisconnected();
     }
 
-    core::Logger::instance().info("DapServer: reader thread exited (TCP)");
+    core::Logger::instance().debug("DapServer: reader thread exited (TCP)");
 }
 
 } // namespace noix::debug

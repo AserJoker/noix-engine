@@ -122,13 +122,13 @@ void ScriptEngine::start() {
 
 void ScriptEngine::stop() {
     if (!_running.load()) return;
-    core::Logger::instance().info("ScriptEngine::stop: begin");
+    core::Logger::instance().debug("ScriptEngine::stop: begin");
     _running.store(false);
     {
         std::lock_guard lock(_queueMutex);
         _queueCv.notify_one();
     }
-    core::Logger::instance().info("ScriptEngine::stop: joining script thread...");
+    core::Logger::instance().debug("ScriptEngine::stop: joining script thread...");
     if (_thread.joinable()) {
         _thread.join();
     }
@@ -138,7 +138,7 @@ void ScriptEngine::stop() {
 void ScriptEngine::reset() {
     core::Logger::instance().info("ScriptEngine::reset: dispatching reset to script thread");
     postTask([this]() {
-        core::Logger::instance().info("ScriptEngine::reset: releasing callbacks...");
+        core::Logger::instance().debug("ScriptEngine::reset: releasing callbacks...");
 
         /* 1. Release all JS callback references before freeing the context */
         releaseCallbacks();
@@ -151,12 +151,12 @@ void ScriptEngine::reset() {
         if (_ctx) { JS_FreeContext(_ctx); _ctx = nullptr; }
         if (_rt) { JS_RunGC(_rt); JS_FreeRuntime(_rt); _rt = nullptr; }
 
-        core::Logger::instance().info("ScriptEngine::reset: QuickJS torn down");
+        core::Logger::instance().debug("ScriptEngine::reset: QuickJS torn down");
 
         /* 3. Reinitialize */
         initQuickJS();
 
-        core::Logger::instance().info("ScriptEngine::reset: complete");
+        core::Logger::instance().debug("ScriptEngine::reset: complete");
     });
 }
 
