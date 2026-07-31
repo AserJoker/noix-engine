@@ -15,6 +15,7 @@
 #include "runtime/ModManager.h"
 #include "runtime/SaveManager.h"
 #include "script/ScriptEngine.h"
+#include "video/Renderer.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
 
@@ -323,6 +324,11 @@ int Application::run() {
         cleanup();
         return 1;
       }
+      _renderer = std::make_unique<video::Renderer>();
+      if (!_renderer->init(_window)) {
+        cleanup();
+        return 1;
+      }
     }
     initDebugServer();
     _scriptEngine->start();
@@ -345,7 +351,9 @@ int Application::run() {
       if (!_frozen.load()) {
         // 游戏逻辑刻（未来）
       }
-      SDL_Delay(10);
+      if (_renderer) {
+        _renderer->render();
+      }
     }
     core::Logger::instance().info("noix-engine shutting down");
     cleanup();
@@ -375,6 +383,7 @@ void Application::cleanup() {
   _modManager.reset();
   _assetManager.reset();
   _scriptEngine.reset();
+  _renderer.reset();
   _eventBus.reset();
   if (_configManager) {
     _configManager->saveAll();

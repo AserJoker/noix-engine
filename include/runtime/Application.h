@@ -15,6 +15,7 @@
 namespace noix::debug { class DebugServer; class DapServer; }
 namespace noix::runtime { class AssetManager; class ConfigManager; class EventBus; class LocaleManager; class ModManager; class SaveManager; }
 namespace noix::script { class ScriptEngine; }
+namespace noix::video { class Renderer; }
 
 struct SDL_Window;
 
@@ -71,6 +72,7 @@ public:
     script::ScriptEngine& scriptEngine() const { return *_scriptEngine; }
     EventBus& eventBus() const { return *_eventBus; }
     ModManager& modManager() const { return *_modManager; }
+    video::Renderer& renderer() const { return *_renderer; }
 
 private:
     bool initCore();
@@ -95,6 +97,7 @@ private:
     std::unique_ptr<LocaleManager> _localeManager;
     std::unique_ptr<SaveManager> _saveManager;
     std::unique_ptr<script::ScriptEngine> _scriptEngine;
+    std::unique_ptr<video::Renderer> _renderer;
     SDL_Window* _window = nullptr;
     std::atomic<bool> _running{false};
     std::atomic<bool> _frozen{false};

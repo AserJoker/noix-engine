@@ -7,9 +7,6 @@
 #include "quickjs.h"
 #include <string>
 
-using noix::runtime::Application;
-using noix::runtime::EventBus;
-
 namespace {
 
 static JSValue eventbus_addEventListener(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {

@@ -12,8 +12,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3_net/SDL_net.h>
 
-#include <cstdio>
-
 namespace noix::debug {
 
 DapSocket::~DapSocket() {

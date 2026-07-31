@@ -1,6 +1,7 @@
 #include "core/SemVer.h"
 #include <cstdlib>
 #include <sstream>
+#include <vector>
 
 namespace noix::core {
 

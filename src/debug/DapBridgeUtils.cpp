@@ -1,7 +1,6 @@
 #include "DapBridgeUtils.h"
 #include "debug/DapBridge.h"
 #include "cJSON.h"
-#include "core/Logger.h"
 
 #include <cassert>
 #include <cstdio>
@@ -10,7 +9,6 @@
 #include <fstream>
 #include <string>
 #include <algorithm>
-#include <climits>
 
 #ifdef _WIN32
 #include <io.h>

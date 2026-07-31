@@ -1,5 +1,4 @@
 #include "script/NativeModules.h"
-#include "core/Logger.h"
 #include "quickjs.h"
 
 namespace noix::script {

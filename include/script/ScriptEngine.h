@@ -4,12 +4,10 @@
 #include <condition_variable>
 #include <functional>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
-#include <vector>
 
 struct JSRuntime;
 struct JSContext;

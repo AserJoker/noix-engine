@@ -3,7 +3,6 @@
 #include "debug/DapBridge.h"
 
 #include <cstdint>
-#include <string>
 #include <thread>
 
 namespace noix::script { class ScriptEngine; }

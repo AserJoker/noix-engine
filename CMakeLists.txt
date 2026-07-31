@@ -59,6 +59,7 @@ add_executable(noix-engine
     src/script/modules/EventBusModule.cpp
     src/script/modules/ModManagerModule.cpp
     src/script/ScriptEngine.cpp
+    src/video/Renderer.cpp
 )
 
 target_include_directories(noix-engine PRIVATE

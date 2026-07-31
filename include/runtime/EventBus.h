@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
-#include <memory>
 
 namespace noix::core { class Value; }
 namespace noix::script { class ScriptEngine; }

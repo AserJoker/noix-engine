@@ -5,7 +5,6 @@
 #include "runtime/AssetManager.h"
 #include "runtime/ConfigManager.h"
 #include "script/ScriptEngine.h"
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>

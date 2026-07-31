@@ -6,7 +6,6 @@
 #include <string>
 
 using noix::runtime::Application;
-using noix::runtime::LocaleManager;
 
 namespace {
 

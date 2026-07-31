@@ -2,13 +2,11 @@
 #include "runtime/Application.h"
 #include "runtime/ModManager.h"
 #include "core/Logger.h"
-#include "core/Value.h"
 #include "script/ScriptEngine.h"
 #include "quickjs.h"
 #include <string>
 
 using noix::runtime::Application;
-using noix::runtime::ModManager;
 
 namespace {
 

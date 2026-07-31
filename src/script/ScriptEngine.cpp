@@ -4,8 +4,6 @@
 
 #include "script/ScriptEngine.h"
 #include "debug/DapBridge.h"
-#include "debug/DebugServer.h"
-#include "debug/commands/ScriptCallbackCommand.h"
 #include "core/Logger.h"
 #include "core/Value.h"
 #include "runtime/EventBus.h"

@@ -8,7 +8,6 @@
 #include "debug/DapBridge.h"
 #include "DapBridgeUtils.h"
 #include "cJSON.h"
-#include "core/Logger.h"
 
 #include <fstream>
 #include <sstream>
