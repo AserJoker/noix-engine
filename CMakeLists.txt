@@ -85,6 +85,9 @@ add_executable(noix-engine
     src/script/modules/ModManagerModule.cpp
     src/script/ScriptEngine.cpp
     src/video/PipelineDef.cpp
+    src/video/NxmdData.cpp
+    src/video/GeometryDef.cpp
+    src/video/MaterialDef.cpp
     src/video/Renderer.cpp
 )
 
