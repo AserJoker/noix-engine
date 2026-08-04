@@ -1,3 +1,3 @@
 {
-  "pipeline": "noix:pipelines/solid"
+  "pipeline": "noix:pipelines/solid.json"
 }

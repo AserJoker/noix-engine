@@ -1,5 +1,5 @@
 {
-  "pipeline": "noix:pipelines/textured",
+  "pipeline": "noix:pipelines/textured.json",
   "textures": {
     "u_albedo": "noix:texture/brickwall.jpg"
   }
