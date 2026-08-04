@@ -43,23 +43,38 @@ public:
     bool isArray() const { return std::holds_alternative<std::vector<Value>>(_data); }
     bool isObject() const { return std::holds_alternative<std::map<std::string, Value>>(_data); }
 
-    // Value access
+    // Value access (no default — returns 0/""/false for wrong type)
     bool asBool() const { return isBool() ? std::get<bool>(_data) : false; }
-
     int asInt() const {
         if (std::holds_alternative<int>(_data)) return std::get<int>(_data);
         if (std::holds_alternative<double>(_data)) return static_cast<int>(std::get<double>(_data));
         return 0;
     }
-
     double asDouble() const {
         if (std::holds_alternative<double>(_data)) return std::get<double>(_data);
         if (std::holds_alternative<int>(_data)) return static_cast<double>(std::get<int>(_data));
         return 0.0;
     }
-
     std::string asString() const {
         return std::holds_alternative<std::string>(_data) ? std::get<std::string>(_data) : std::string{};
+    }
+
+    // Value access with explicit default
+    bool asBool(bool defaultValue) const {
+        return isBool() ? std::get<bool>(_data) : defaultValue;
+    }
+    int asInt(int defaultValue) const {
+        if (std::holds_alternative<int>(_data)) return std::get<int>(_data);
+        if (std::holds_alternative<double>(_data)) return static_cast<int>(std::get<double>(_data));
+        return defaultValue;
+    }
+    double asDouble(double defaultValue) const {
+        if (std::holds_alternative<double>(_data)) return std::get<double>(_data);
+        if (std::holds_alternative<int>(_data)) return static_cast<double>(std::get<int>(_data));
+        return defaultValue;
+    }
+    std::string asString(const std::string &defaultValue) const {
+        return std::holds_alternative<std::string>(_data) ? std::get<std::string>(_data) : defaultValue;
     }
 
     const std::map<std::string, Value>& asObject() const {

@@ -325,7 +325,7 @@ int Application::run() {
         return 1;
       }
       _renderer = std::make_unique<video::Renderer>();
-      if (!_renderer->init(_window)) {
+      if (!_renderer->init(_window, *_assetManager)) {
         cleanup();
         return 1;
       }

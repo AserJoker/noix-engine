@@ -84,6 +84,7 @@ add_executable(noix-engine
     src/script/modules/EventBusModule.cpp
     src/script/modules/ModManagerModule.cpp
     src/script/ScriptEngine.cpp
+    src/video/PipelineDef.cpp
     src/video/Renderer.cpp
 )
 

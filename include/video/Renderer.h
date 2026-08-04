@@ -2,10 +2,16 @@
 
 /*
  * Renderer — SDL3 GPU rendering backend.
- * Currently only clears the window with a configurable color.
+ * Loads pipeline definitions from JSON resources and renders geometry.
  */
 
 #include <SDL3/SDL_gpu.h>
+
+#include <map>
+#include <string>
+
+namespace noix::runtime { class AssetManager; }
+namespace noix::core { class NamespacedId; }
 
 namespace noix::video {
 
@@ -17,19 +23,25 @@ public:
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
 
-  /// Initialize GPU device and claim the window.
-  bool init(SDL_Window *window);
+  /// Initialize GPU device, claim the window, and load the default pipeline.
+  bool init(SDL_Window *window, runtime::AssetManager &assetMgr);
 
   /// Shut down and release GPU resources.
   void shutdown();
 
-  /// Clear the window with the configured clear color and present.
+  /// Render the frame.
   void render();
 
 private:
   SDL_GPUDevice *_device = nullptr;
   SDL_Window *_window = nullptr;
   bool _initialized = false;
+
+  SDL_GPUBuffer *_vertexBuffer = nullptr;
+  SDL_GPUGraphicsPipeline *_pipeline = nullptr;
+
+  SDL_GPUShader *loadShader(const std::string &absolutePath,
+                            SDL_GPUShaderStage stage);
 };
 
 } // namespace noix::video
