@@ -40,26 +40,21 @@ SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
     return shader;
 }
 
-SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath,
-                                       SDL_GPUTextureFormat textureFormat) {
+SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath) {
     SDL_Surface *surface = IMG_Load(absolutePath.c_str());
     if (!surface) {
         core::Logger::instance().error("Renderer: Failed to load image: {}", SDL_GetError());
         return nullptr;
     }
 
-    // Convert surface to match the GPU texture format
-    // VK_FORMAT_B8G8R8A8_UNORM stores bytes as B,G,R,A which on little-endian
-    // corresponds to SDL_PIXELFORMAT_ARGB8888
-    SDL_PixelFormat targetFmt = SDL_PIXELFORMAT_ARGB8888;
-    if (textureFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM) {
-        targetFmt = SDL_PIXELFORMAT_RGBA8888;
-    }
-    if (surface->format != targetFmt) {
-        SDL_Surface *converted = SDL_ConvertSurface(surface, targetFmt);
+    // Convert surface to RGBA8888 — the canonical texture format.
+    // The GPU texture is always R8G8B8A8_UNORM; Vulkan handles format
+    // conversion when writing to the swapchain automatically.
+    if (surface->format != SDL_PIXELFORMAT_RGBA8888) {
+        SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA8888);
         SDL_DestroySurface(surface);
         if (!converted) {
-            core::Logger::instance().error("Renderer: Failed to convert surface format");
+            core::Logger::instance().error("Renderer: Failed to convert surface to RGBA8888");
             return nullptr;
         }
         surface = converted;
@@ -67,7 +62,7 @@ SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath,
 
     SDL_GPUTextureCreateInfo texInfo{};
     texInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    texInfo.format = textureFormat;
+    texInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     texInfo.width = static_cast<Uint32>(surface->w);
     texInfo.height = static_cast<Uint32>(surface->h);
     texInfo.layer_count_or_depth = 1;
@@ -202,9 +197,7 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
             shutdown();
             return false;
         }
-        SDL_GPUTextureFormat swapchainFmt =
-            SDL_GetGPUSwapchainTextureFormat(_device, _window);
-        _texture = loadTexture(texPath->string(), swapchainFmt);
+        _texture = loadTexture(texPath->string());
         if (!_texture) {
             shutdown();
             return false;

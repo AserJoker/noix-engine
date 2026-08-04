@@ -47,8 +47,7 @@ private:
 
   SDL_GPUShader *loadShader(const std::string &absolutePath,
                             SDL_GPUShaderStage stage);
-  SDL_GPUTexture *loadTexture(const std::string &absolutePath,
-                               SDL_GPUTextureFormat textureFormat);
+  SDL_GPUTexture *loadTexture(const std::string &absolutePath);
 };
 
 } // namespace noix::video
