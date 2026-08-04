@@ -102,10 +102,10 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     }
 
     // --- Load shaders referenced by the pipeline definition ---
-    auto vsPath = assetMgr.resolve(pipelineDef->vertexShader);
+    auto vsPath = assetMgr.resolve(pipelineDef->vertexShader());
     if (!vsPath.has_value()) {
         core::Logger::instance().error(
-            "Renderer: Vertex shader not found: {}", pipelineDef->vertexShader.toString());
+            "Renderer: Vertex shader not found: {}", pipelineDef->vertexShader().toString());
         shutdown();
         return false;
     }
@@ -116,10 +116,10 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-    shaderMap[pipelineDef->vertexShader] = vs;
+    shaderMap[pipelineDef->vertexShader()] = vs;
 
-    if (pipelineDef->fragmentShader.has_value()) {
-        const core::NamespacedId &fsId = pipelineDef->fragmentShader.value();
+    if (pipelineDef->fragmentShader().has_value()) {
+        const core::NamespacedId &fsId = pipelineDef->fragmentShader().value();
         auto fsPath = assetMgr.resolve(fsId);
         if (!fsPath.has_value()) {
             core::Logger::instance().error(

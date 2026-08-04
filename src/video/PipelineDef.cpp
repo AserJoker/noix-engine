@@ -429,15 +429,15 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
     // Shaders
     auto vsStr = v["vertex_shader"].asString();
     if (vsStr.empty()) return std::nullopt;
-    def.vertexShader = core::NamespacedId::parse(vsStr);
+    def._vertexShader = core::NamespacedId::parse(vsStr);
 
     auto fsStr = v["fragment_shader"].asString();
     if (!fsStr.empty()) {
-        def.fragmentShader = core::NamespacedId::parse(fsStr);
+        def._fragmentShader = core::NamespacedId::parse(fsStr);
     }
 
     // Primitive type
-    def.primitiveType = toSDLPrimitiveType(v["primitive_type"].asString("triangle_list"));
+    def._primitiveType = toSDLPrimitiveType(v["primitive_type"].asString("triangle_list"));
 
     // Vertex input
     auto vi = v["vertex_input"];
@@ -451,7 +451,7 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
                 d.pitch = static_cast<Uint32>(b["stride"].asInt(0));
                 d.input_rate = toSDLVertexInputRate(b["input_rate"].asString("vertex"));
                 d.instance_step_rate = 0;
-                def.vertexBuffers.push_back(d);
+                def._vertexBuffers.push_back(d);
             }
         }
         auto attrs = vi["attributes"];
@@ -463,7 +463,7 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
                 d.buffer_slot = static_cast<Uint32>(a["buffer_slot"].asInt(0));
                 d.format = toSDLVertexFormat(a["format"].asString("float4"));
                 d.offset = static_cast<Uint32>(a["offset"].asInt(0));
-                def.vertexAttributes.push_back(d);
+                def._vertexAttributes.push_back(d);
             }
         }
     }
@@ -471,42 +471,42 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
     // Rasterizer
     auto rast = v["rasterizer"];
     if (rast.isObject()) {
-        def.rasterizer.fillMode = toSDLFillMode(rast["fill_mode"].asString("fill"));
-        def.rasterizer.cullMode = toSDLCullMode(rast["cull_mode"].asString("none"));
-        def.rasterizer.frontFace = toSDLFrontFace(rast["front_face"].asString("counter_clockwise"));
-        def.rasterizer.depthBiasConstantFactor = static_cast<float>(rast["depth_bias_constant_factor"].asDouble(0.0));
-        def.rasterizer.depthBiasClamp = static_cast<float>(rast["depth_bias_clamp"].asDouble(0.0));
-        def.rasterizer.depthBiasSlopeFactor = static_cast<float>(rast["depth_bias_slope_factor"].asDouble(0.0));
-        def.rasterizer.enableDepthBias = rast["enable_depth_bias"].asBool(false);
-        def.rasterizer.enableDepthClip = rast["enable_depth_clip"].asBool(true);
+        def._rasterizer.fillMode = toSDLFillMode(rast["fill_mode"].asString("fill"));
+        def._rasterizer.cullMode = toSDLCullMode(rast["cull_mode"].asString("none"));
+        def._rasterizer.frontFace = toSDLFrontFace(rast["front_face"].asString("counter_clockwise"));
+        def._rasterizer.depthBiasConstantFactor = static_cast<float>(rast["depth_bias_constant_factor"].asDouble(0.0));
+        def._rasterizer.depthBiasClamp = static_cast<float>(rast["depth_bias_clamp"].asDouble(0.0));
+        def._rasterizer.depthBiasSlopeFactor = static_cast<float>(rast["depth_bias_slope_factor"].asDouble(0.0));
+        def._rasterizer.enableDepthBias = rast["enable_depth_bias"].asBool(false);
+        def._rasterizer.enableDepthClip = rast["enable_depth_clip"].asBool(true);
     }
 
     // Depth stencil (optional)
     auto ds = v["depth_stencil"];
     if (ds.isObject()) {
-        def.depthStencil = DepthStencilDef{};
-        def.depthStencil->compareOp = toSDLCompareOp(ds["compare_op"].asString("less"));
-        def.depthStencil->enableDepthTest = ds["depth_test"].asBool(true);
-        def.depthStencil->enableDepthWrite = ds["depth_write"].asBool(true);
-        def.depthStencil->enableStencilTest = ds["enable_stencil_test"].asBool(false);
-        def.depthStencil->compareMask = static_cast<Uint8>(ds["compare_mask"].asInt(0xFF));
-        def.depthStencil->writeMask = static_cast<Uint8>(ds["write_mask"].asInt(0xFF));
+        def._depthStencil = DepthStencilDef{};
+        def._depthStencil->compareOp = toSDLCompareOp(ds["compare_op"].asString("less"));
+        def._depthStencil->enableDepthTest = ds["depth_test"].asBool(true);
+        def._depthStencil->enableDepthWrite = ds["depth_write"].asBool(true);
+        def._depthStencil->enableStencilTest = ds["enable_stencil_test"].asBool(false);
+        def._depthStencil->compareMask = static_cast<Uint8>(ds["compare_mask"].asInt(0xFF));
+        def._depthStencil->writeMask = static_cast<Uint8>(ds["write_mask"].asInt(0xFF));
 
         // Back stencil
         auto bs = ds["back_stencil"];
         if (bs.isObject()) {
-            def.depthStencil->backStencil.failOp = toSDLStencilOp(bs["fail_op"].asString("keep"));
-            def.depthStencil->backStencil.passOp = toSDLStencilOp(bs["pass_op"].asString("keep"));
-            def.depthStencil->backStencil.depthFailOp = toSDLStencilOp(bs["depth_fail_op"].asString("keep"));
-            def.depthStencil->backStencil.compareOp = toSDLCompareOp(bs["compare_op"].asString("always"));
+            def._depthStencil->backStencil.failOp = toSDLStencilOp(bs["fail_op"].asString("keep"));
+            def._depthStencil->backStencil.passOp = toSDLStencilOp(bs["pass_op"].asString("keep"));
+            def._depthStencil->backStencil.depthFailOp = toSDLStencilOp(bs["depth_fail_op"].asString("keep"));
+            def._depthStencil->backStencil.compareOp = toSDLCompareOp(bs["compare_op"].asString("always"));
         }
         // Front stencil
         auto fs = ds["front_stencil"];
         if (fs.isObject()) {
-            def.depthStencil->frontStencil.failOp = toSDLStencilOp(fs["fail_op"].asString("keep"));
-            def.depthStencil->frontStencil.passOp = toSDLStencilOp(fs["pass_op"].asString("keep"));
-            def.depthStencil->frontStencil.depthFailOp = toSDLStencilOp(fs["depth_fail_op"].asString("keep"));
-            def.depthStencil->frontStencil.compareOp = toSDLCompareOp(fs["compare_op"].asString("always"));
+            def._depthStencil->frontStencil.failOp = toSDLStencilOp(fs["fail_op"].asString("keep"));
+            def._depthStencil->frontStencil.passOp = toSDLStencilOp(fs["pass_op"].asString("keep"));
+            def._depthStencil->frontStencil.depthFailOp = toSDLStencilOp(fs["depth_fail_op"].asString("keep"));
+            def._depthStencil->frontStencil.compareOp = toSDLCompareOp(fs["compare_op"].asString("always"));
         }
     }
 
@@ -531,16 +531,16 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
                 ctd.blend->enableBlend = blend["enable_blend"].asBool(true);
                 ctd.blend->enableColorWriteMask = blend["enable_color_write_mask"].asBool(false);
             }
-            def.colorTargets.push_back(ctd);
+            def._colorTargets.push_back(ctd);
         }
     }
 
     // Multisample
     auto ms = v["multisample"];
     if (ms.isObject()) {
-        def.multisample.sampleCount = toSDLSampleCount(ms["sample_count"].asInt(1));
-        def.multisample.sampleMask = static_cast<Uint32>(ms["sample_mask"].asInt(0));
-        def.multisample.enableAlphaToCoverage = ms["enable_alpha_to_coverage"].asBool(false);
+        def._multisample.sampleCount = toSDLSampleCount(ms["sample_count"].asInt(1));
+        def._multisample.sampleMask = static_cast<Uint32>(ms["sample_mask"].asInt(0));
+        def._multisample.enableAlphaToCoverage = ms["enable_alpha_to_coverage"].asBool(false);
     }
 
     return def;
@@ -553,19 +553,19 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
 core::Value PipelineDef::dump() const {
     auto obj = core::Value::object();
 
-    obj.asObject()["vertex_shader"] = core::Value(vertexShader.toString());
-    if (fragmentShader.has_value()) {
-        obj.asObject()["fragment_shader"] = core::Value(fragmentShader->toString());
+    obj.asObject()["vertex_shader"] = core::Value(_vertexShader.toString());
+    if (_fragmentShader.has_value()) {
+        obj.asObject()["fragment_shader"] = core::Value(_fragmentShader->toString());
     } else {
         obj.asObject()["fragment_shader"] = core::Value();
     }
-    obj.asObject()["primitive_type"] = core::Value(fromSDLPrimitiveType(primitiveType));
+    obj.asObject()["primitive_type"] = core::Value(fromSDLPrimitiveType(_primitiveType));
 
     // Vertex input
     {
         auto viObj = core::Value::object();
         auto bufs = core::Value::array();
-        for (auto &b : vertexBuffers) {
+        for (auto &b : _vertexBuffers) {
             auto bo = core::Value::object();
             bo.asObject()["slot"] = core::Value(static_cast<int>(b.slot));
             bo.asObject()["stride"] = core::Value(static_cast<int>(b.pitch));
@@ -573,7 +573,7 @@ core::Value PipelineDef::dump() const {
             bufs.asArray().push_back(bo);
         }
         auto attrs = core::Value::array();
-        for (auto &a : vertexAttributes) {
+        for (auto &a : _vertexAttributes) {
             auto ao = core::Value::object();
             ao.asObject()["location"] = core::Value(static_cast<int>(a.location));
             ao.asObject()["buffer_slot"] = core::Value(static_cast<int>(a.buffer_slot));
@@ -589,40 +589,40 @@ core::Value PipelineDef::dump() const {
     // Rasterizer
     {
         auto rObj = core::Value::object();
-        rObj.asObject()["fill_mode"] = core::Value(fromSDLFillMode(rasterizer.fillMode));
-        rObj.asObject()["cull_mode"] = core::Value(fromSDLCullMode(rasterizer.cullMode));
-        rObj.asObject()["front_face"] = core::Value(fromSDLFrontFace(rasterizer.frontFace));
-        rObj.asObject()["depth_bias_constant_factor"] = core::Value(rasterizer.depthBiasConstantFactor);
-        rObj.asObject()["depth_bias_clamp"] = core::Value(rasterizer.depthBiasClamp);
-        rObj.asObject()["depth_bias_slope_factor"] = core::Value(rasterizer.depthBiasSlopeFactor);
-        rObj.asObject()["enable_depth_bias"] = core::Value(rasterizer.enableDepthBias);
-        rObj.asObject()["enable_depth_clip"] = core::Value(rasterizer.enableDepthClip);
+        rObj.asObject()["fill_mode"] = core::Value(fromSDLFillMode(_rasterizer.fillMode));
+        rObj.asObject()["cull_mode"] = core::Value(fromSDLCullMode(_rasterizer.cullMode));
+        rObj.asObject()["front_face"] = core::Value(fromSDLFrontFace(_rasterizer.frontFace));
+        rObj.asObject()["depth_bias_constant_factor"] = core::Value(_rasterizer.depthBiasConstantFactor);
+        rObj.asObject()["depth_bias_clamp"] = core::Value(_rasterizer.depthBiasClamp);
+        rObj.asObject()["depth_bias_slope_factor"] = core::Value(_rasterizer.depthBiasSlopeFactor);
+        rObj.asObject()["enable_depth_bias"] = core::Value(_rasterizer.enableDepthBias);
+        rObj.asObject()["enable_depth_clip"] = core::Value(_rasterizer.enableDepthClip);
         obj.asObject()["rasterizer"] = rObj;
     }
 
     // Depth stencil
-    if (depthStencil.has_value()) {
+    if (_depthStencil.has_value()) {
         auto dsObj = core::Value::object();
-        dsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(depthStencil->compareOp));
-        dsObj.asObject()["depth_test"] = core::Value(depthStencil->enableDepthTest);
-        dsObj.asObject()["depth_write"] = core::Value(depthStencil->enableDepthWrite);
-        dsObj.asObject()["enable_stencil_test"] = core::Value(depthStencil->enableStencilTest);
-        dsObj.asObject()["compare_mask"] = core::Value(static_cast<int>(depthStencil->compareMask));
-        dsObj.asObject()["write_mask"] = core::Value(static_cast<int>(depthStencil->writeMask));
+        dsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(_depthStencil->compareOp));
+        dsObj.asObject()["depth_test"] = core::Value(_depthStencil->enableDepthTest);
+        dsObj.asObject()["depth_write"] = core::Value(_depthStencil->enableDepthWrite);
+        dsObj.asObject()["enable_stencil_test"] = core::Value(_depthStencil->enableStencilTest);
+        dsObj.asObject()["compare_mask"] = core::Value(static_cast<int>(_depthStencil->compareMask));
+        dsObj.asObject()["write_mask"] = core::Value(static_cast<int>(_depthStencil->writeMask));
         {
             auto bsObj = core::Value::object();
-            bsObj.asObject()["fail_op"] = core::Value(fromSDLStencilOp(depthStencil->backStencil.failOp));
-            bsObj.asObject()["pass_op"] = core::Value(fromSDLStencilOp(depthStencil->backStencil.passOp));
-            bsObj.asObject()["depth_fail_op"] = core::Value(fromSDLStencilOp(depthStencil->backStencil.depthFailOp));
-            bsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(depthStencil->backStencil.compareOp));
+            bsObj.asObject()["fail_op"] = core::Value(fromSDLStencilOp(_depthStencil->backStencil.failOp));
+            bsObj.asObject()["pass_op"] = core::Value(fromSDLStencilOp(_depthStencil->backStencil.passOp));
+            bsObj.asObject()["depth_fail_op"] = core::Value(fromSDLStencilOp(_depthStencil->backStencil.depthFailOp));
+            bsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(_depthStencil->backStencil.compareOp));
             dsObj.asObject()["back_stencil"] = bsObj;
         }
         {
             auto fsObj = core::Value::object();
-            fsObj.asObject()["fail_op"] = core::Value(fromSDLStencilOp(depthStencil->frontStencil.failOp));
-            fsObj.asObject()["pass_op"] = core::Value(fromSDLStencilOp(depthStencil->frontStencil.passOp));
-            fsObj.asObject()["depth_fail_op"] = core::Value(fromSDLStencilOp(depthStencil->frontStencil.depthFailOp));
-            fsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(depthStencil->frontStencil.compareOp));
+            fsObj.asObject()["fail_op"] = core::Value(fromSDLStencilOp(_depthStencil->frontStencil.failOp));
+            fsObj.asObject()["pass_op"] = core::Value(fromSDLStencilOp(_depthStencil->frontStencil.passOp));
+            fsObj.asObject()["depth_fail_op"] = core::Value(fromSDLStencilOp(_depthStencil->frontStencil.depthFailOp));
+            fsObj.asObject()["compare_op"] = core::Value(fromSDLCompareOp(_depthStencil->frontStencil.compareOp));
             dsObj.asObject()["front_stencil"] = fsObj;
         }
         obj.asObject()["depth_stencil"] = dsObj;
@@ -633,7 +633,7 @@ core::Value PipelineDef::dump() const {
     // Color targets
     {
         auto ctsArr = core::Value::array();
-        for (auto &ct : colorTargets) {
+        for (auto &ct : _colorTargets) {
             auto ctObj = core::Value::object();
             ctObj.asObject()["format"] = core::Value(ct.format);
             if (ct.blend.has_value()) {
@@ -659,9 +659,9 @@ core::Value PipelineDef::dump() const {
     // Multisample
     {
         auto msObj = core::Value::object();
-        msObj.asObject()["sample_count"] = core::Value(fromSDLSampleCount(multisample.sampleCount));
-        msObj.asObject()["sample_mask"] = core::Value(static_cast<int>(multisample.sampleMask));
-        msObj.asObject()["enable_alpha_to_coverage"] = core::Value(multisample.enableAlphaToCoverage);
+        msObj.asObject()["sample_count"] = core::Value(fromSDLSampleCount(_multisample.sampleCount));
+        msObj.asObject()["sample_mask"] = core::Value(static_cast<int>(_multisample.sampleMask));
+        msObj.asObject()["enable_alpha_to_coverage"] = core::Value(_multisample.enableAlphaToCoverage);
         obj.asObject()["multisample"] = msObj;
     }
 
@@ -680,53 +680,53 @@ SDL_GPUGraphicsPipeline *PipelineDef::createPipeline(
     SDL_GPUGraphicsPipelineCreateInfo info{};
 
     // Shaders
-    auto vsIt = shaderMap.find(vertexShader);
+    auto vsIt = shaderMap.find(_vertexShader);
     info.vertex_shader = (vsIt != shaderMap.end()) ? vsIt->second : nullptr;
 
-    if (fragmentShader.has_value()) {
-        auto fsIt = shaderMap.find(*fragmentShader);
+    if (_fragmentShader.has_value()) {
+        auto fsIt = shaderMap.find(*_fragmentShader);
         info.fragment_shader = (fsIt != shaderMap.end()) ? fsIt->second : nullptr;
     } else {
         info.fragment_shader = nullptr;
     }
 
     // Primitive type
-    info.primitive_type = primitiveType;
+    info.primitive_type = _primitiveType;
 
     // Vertex input
-    info.vertex_input_state.vertex_buffer_descriptions = vertexBuffers.data();
+    info.vertex_input_state.vertex_buffer_descriptions = _vertexBuffers.data();
     info.vertex_input_state.num_vertex_buffers =
-        static_cast<Uint32>(vertexBuffers.size());
-    info.vertex_input_state.vertex_attributes = vertexAttributes.data();
+        static_cast<Uint32>(_vertexBuffers.size());
+    info.vertex_input_state.vertex_attributes = _vertexAttributes.data();
     info.vertex_input_state.num_vertex_attributes =
-        static_cast<Uint32>(vertexAttributes.size());
+        static_cast<Uint32>(_vertexAttributes.size());
 
     // Rasterizer
-    info.rasterizer_state.fill_mode = rasterizer.fillMode;
-    info.rasterizer_state.cull_mode = rasterizer.cullMode;
-    info.rasterizer_state.front_face = rasterizer.frontFace;
-    info.rasterizer_state.depth_bias_constant_factor = rasterizer.depthBiasConstantFactor;
-    info.rasterizer_state.depth_bias_clamp = rasterizer.depthBiasClamp;
-    info.rasterizer_state.depth_bias_slope_factor = rasterizer.depthBiasSlopeFactor;
-    info.rasterizer_state.enable_depth_bias = rasterizer.enableDepthBias;
-    info.rasterizer_state.enable_depth_clip = rasterizer.enableDepthClip;
+    info.rasterizer_state.fill_mode = _rasterizer.fillMode;
+    info.rasterizer_state.cull_mode = _rasterizer.cullMode;
+    info.rasterizer_state.front_face = _rasterizer.frontFace;
+    info.rasterizer_state.depth_bias_constant_factor = _rasterizer.depthBiasConstantFactor;
+    info.rasterizer_state.depth_bias_clamp = _rasterizer.depthBiasClamp;
+    info.rasterizer_state.depth_bias_slope_factor = _rasterizer.depthBiasSlopeFactor;
+    info.rasterizer_state.enable_depth_bias = _rasterizer.enableDepthBias;
+    info.rasterizer_state.enable_depth_clip = _rasterizer.enableDepthClip;
 
     // Depth stencil
-    if (depthStencil.has_value()) {
-        info.depth_stencil_state.compare_op = depthStencil->compareOp;
-        info.depth_stencil_state.back_stencil_state.fail_op = depthStencil->backStencil.failOp;
-        info.depth_stencil_state.back_stencil_state.pass_op = depthStencil->backStencil.passOp;
-        info.depth_stencil_state.back_stencil_state.depth_fail_op = depthStencil->backStencil.depthFailOp;
-        info.depth_stencil_state.back_stencil_state.compare_op = depthStencil->backStencil.compareOp;
-        info.depth_stencil_state.front_stencil_state.fail_op = depthStencil->frontStencil.failOp;
-        info.depth_stencil_state.front_stencil_state.pass_op = depthStencil->frontStencil.passOp;
-        info.depth_stencil_state.front_stencil_state.depth_fail_op = depthStencil->frontStencil.depthFailOp;
-        info.depth_stencil_state.front_stencil_state.compare_op = depthStencil->frontStencil.compareOp;
-        info.depth_stencil_state.compare_mask = depthStencil->compareMask;
-        info.depth_stencil_state.write_mask = depthStencil->writeMask;
-        info.depth_stencil_state.enable_depth_test = depthStencil->enableDepthTest;
-        info.depth_stencil_state.enable_depth_write = depthStencil->enableDepthWrite;
-        info.depth_stencil_state.enable_stencil_test = depthStencil->enableStencilTest;
+    if (_depthStencil.has_value()) {
+        info.depth_stencil_state.compare_op = _depthStencil->compareOp;
+        info.depth_stencil_state.back_stencil_state.fail_op = _depthStencil->backStencil.failOp;
+        info.depth_stencil_state.back_stencil_state.pass_op = _depthStencil->backStencil.passOp;
+        info.depth_stencil_state.back_stencil_state.depth_fail_op = _depthStencil->backStencil.depthFailOp;
+        info.depth_stencil_state.back_stencil_state.compare_op = _depthStencil->backStencil.compareOp;
+        info.depth_stencil_state.front_stencil_state.fail_op = _depthStencil->frontStencil.failOp;
+        info.depth_stencil_state.front_stencil_state.pass_op = _depthStencil->frontStencil.passOp;
+        info.depth_stencil_state.front_stencil_state.depth_fail_op = _depthStencil->frontStencil.depthFailOp;
+        info.depth_stencil_state.front_stencil_state.compare_op = _depthStencil->frontStencil.compareOp;
+        info.depth_stencil_state.compare_mask = _depthStencil->compareMask;
+        info.depth_stencil_state.write_mask = _depthStencil->writeMask;
+        info.depth_stencil_state.enable_depth_test = _depthStencil->enableDepthTest;
+        info.depth_stencil_state.enable_depth_write = _depthStencil->enableDepthWrite;
+        info.depth_stencil_state.enable_stencil_test = _depthStencil->enableStencilTest;
         info.target_info.has_depth_stencil_target = true;
         info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
     } else {
@@ -735,8 +735,8 @@ SDL_GPUGraphicsPipeline *PipelineDef::createPipeline(
 
     // Color targets
     std::vector<SDL_GPUColorTargetDescription> sdlCTs;
-    sdlCTs.reserve(colorTargets.size());
-    for (auto &ct : colorTargets) {
+    sdlCTs.reserve(_colorTargets.size());
+    for (auto &ct : _colorTargets) {
         SDL_GPUColorTargetDescription d{};
         if (ct.format == "swapchain") {
             d.format = swapchainFormat;
@@ -760,9 +760,9 @@ SDL_GPUGraphicsPipeline *PipelineDef::createPipeline(
     info.target_info.color_target_descriptions = sdlCTs.data();
 
     // Multisample
-    info.multisample_state.sample_count = multisample.sampleCount;
-    info.multisample_state.sample_mask = multisample.sampleMask;
-    info.multisample_state.enable_alpha_to_coverage = multisample.enableAlphaToCoverage;
+    info.multisample_state.sample_count = _multisample.sampleCount;
+    info.multisample_state.sample_mask = _multisample.sampleMask;
+    info.multisample_state.enable_alpha_to_coverage = _multisample.enableAlphaToCoverage;
 
     return SDL_CreateGPUGraphicsPipeline(device, &info);
 }

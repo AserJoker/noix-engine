@@ -112,23 +112,8 @@ struct MultisampleDef {
 
 // ---- PipelineDef ----
 
-struct PipelineDef {
-    core::NamespacedId vertexShader;
-    std::optional<core::NamespacedId> fragmentShader;
-
-    SDL_GPUPrimitiveType primitiveType = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-
-    std::vector<SDL_GPUVertexBufferDescription> vertexBuffers;
-    std::vector<SDL_GPUVertexAttribute> vertexAttributes;
-
-    RasterizerDef rasterizer;
-
-    std::optional<DepthStencilDef> depthStencil;
-
-    std::vector<ColorTargetDef> colorTargets;
-
-    MultisampleDef multisample;
-
+class PipelineDef {
+public:
     /// Parse from a Value (JSON). Returns nullopt on failure.
     static std::optional<PipelineDef> parse(const core::Value &v);
 
@@ -140,6 +125,35 @@ struct PipelineDef {
         SDL_GPUDevice *device,
         const std::map<core::NamespacedId, SDL_GPUShader *> &shaderMap,
         SDL_GPUTextureFormat swapchainFormat) const;
+
+    // Accessors
+    const core::NamespacedId &vertexShader() const { return _vertexShader; }
+    const std::optional<core::NamespacedId> &fragmentShader() const { return _fragmentShader; }
+
+    SDL_GPUPrimitiveType primitiveType() const { return _primitiveType; }
+    const std::vector<SDL_GPUVertexBufferDescription> &vertexBuffers() const { return _vertexBuffers; }
+    const std::vector<SDL_GPUVertexAttribute> &vertexAttributes() const { return _vertexAttributes; }
+    const RasterizerDef &rasterizer() const { return _rasterizer; }
+    const std::optional<DepthStencilDef> &depthStencil() const { return _depthStencil; }
+    const std::vector<ColorTargetDef> &colorTargets() const { return _colorTargets; }
+    const MultisampleDef &multisample() const { return _multisample; }
+
+private:
+    core::NamespacedId _vertexShader;
+    std::optional<core::NamespacedId> _fragmentShader;
+
+    SDL_GPUPrimitiveType _primitiveType = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+
+    std::vector<SDL_GPUVertexBufferDescription> _vertexBuffers;
+    std::vector<SDL_GPUVertexAttribute> _vertexAttributes;
+
+    RasterizerDef _rasterizer;
+
+    std::optional<DepthStencilDef> _depthStencil;
+
+    std::vector<ColorTargetDef> _colorTargets;
+
+    MultisampleDef _multisample;
 };
 
 } // namespace noix::video
