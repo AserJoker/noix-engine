@@ -1,11 +1,23 @@
 #include "video/MaterialDef.h"
 #include "core/Logger.h"
 
+#include <SDL3/SDL.h>
+
+#include <fstream>
+#include <sstream>
+
 namespace noix::video {
 
 std::optional<MaterialDef> MaterialDef::load(const std::string &path) {
-    // Read file
-    auto fileContent = core::Value::parse(path);
+    // Read file content
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        core::Logger::instance().error("MaterialDef: Cannot open file: {}", path);
+        return std::nullopt;
+    }
+    std::stringstream buf;
+    buf << file.rdbuf();
+    auto fileContent = core::Value::parse(buf.str());
     if (fileContent.isNull()) {
         core::Logger::instance().error("MaterialDef: Cannot parse file: {}", path);
         return std::nullopt;

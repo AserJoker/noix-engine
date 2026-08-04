@@ -49,15 +49,24 @@ std::vector<std::filesystem::path> AssetManager::listPacks() const {
 
 std::optional<std::filesystem::path> AssetManager::resolve(const core::NamespacedId& id) const {
     auto rel = toRelativePath(id);
+
+    // Try exact path first, then with common extensions
+    static const char *extensions[] = {".json", ".nxmd"};
     for (auto it = _packRoots.rbegin(); it != _packRoots.rend(); ++it) {
         auto candidate = *it / rel;
-        if (std::filesystem::exists(candidate)) {
-            return candidate;
+        if (std::filesystem::exists(candidate)) return candidate;
+        for (const char *ext : extensions) {
+            auto withExt = candidate;
+            withExt += ext;
+            if (std::filesystem::exists(withExt)) return withExt;
         }
     }
     auto candidate = _defaultPath / rel;
-    if (std::filesystem::exists(candidate)) {
-        return candidate;
+    if (std::filesystem::exists(candidate)) return candidate;
+    for (const char *ext : extensions) {
+        auto withExt = candidate;
+        withExt += ext;
+        if (std::filesystem::exists(withExt)) return withExt;
     }
     return std::nullopt;
 }

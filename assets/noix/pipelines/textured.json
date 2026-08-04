@@ -1,28 +1,18 @@
 {
-  "vertex_shader": "noix:shaders/solid/tri_color.vert.spv",
-  "fragment_shader": "noix:shaders/solid/color.frag.spv",
+  "vertex_shader": "noix:shaders/textured/texture.vert.spv",
+  "fragment_shader": "noix:shaders/textured/texture.frag.spv",
   "primitive_type": "triangle_list",
   "vertex_input": {
     "buffers": [
       {
         "slot": 0,
-        "stride": 24,
+        "stride": 16,
         "input_rate": "vertex"
       }
     ],
     "attributes": [
-      {
-        "location": 0,
-        "buffer_slot": 0,
-        "format": "float2",
-        "offset": 0
-      },
-      {
-        "location": 1,
-        "buffer_slot": 0,
-        "format": "float4",
-        "offset": 8
-      }
+      { "location": 0, "buffer_slot": 0, "format": "float2", "offset": 0 },
+      { "location": 1, "buffer_slot": 0, "format": "float2", "offset": 8 }
     ]
   },
   "rasterizer": {
@@ -43,7 +33,5 @@
       }
     }
   ],
-  "multisample": {
-    "sample_count": 1
-  }
+  "multisample": { "sample_count": 1 }
 }

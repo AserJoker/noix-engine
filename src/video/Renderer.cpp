@@ -1,29 +1,16 @@
 #include "video/Renderer.h"
 #include "video/PipelineDef.h"
+#include "video/MaterialDef.h"
 #include "core/Logger.h"
 #include "runtime/AssetManager.h"
 
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_gpu.h>
+#include <SDL3_image/SDL_image.h>
 
 #include <fstream>
 #include <sstream>
 
 namespace noix::video {
-
-// --- Vertex layout: vec2 position + vec4 color ---
-struct Vertex {
-    float x, y;
-    float r, g, b, a;
-};
-
-static const Vertex TRIANGLE_VERTICES[] = {
-    {-0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f}, // Red (bottom-left)
-    { 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f}, // Green (bottom-right)
-    { 0.0f,  0.5f, 0.0f, 0.0f, 1.0f, 1.0f}, // Blue (top)
-};
-
-// ---------------------------------------------------------------------------
 
 SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
                                      SDL_GPUShaderStage stage) {
@@ -41,6 +28,7 @@ SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
     createInfo.entrypoint = "main";
     createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
     createInfo.stage = stage;
+    createInfo.num_samplers = (stage == SDL_GPU_SHADERSTAGE_FRAGMENT) ? 1 : 0;
 
     SDL_GPUShader *shader = SDL_CreateGPUShader(_device, &createInfo);
     SDL_free(code);
@@ -50,6 +38,101 @@ SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
             "Renderer: Failed to create shader from: {}", absolutePath);
     }
     return shader;
+}
+
+SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath,
+                                       SDL_GPUTextureFormat textureFormat) {
+    SDL_Surface *surface = IMG_Load(absolutePath.c_str());
+    if (!surface) {
+        core::Logger::instance().error("Renderer: Failed to load image: {}", SDL_GetError());
+        return nullptr;
+    }
+
+    // Convert surface to match the GPU texture format
+    // VK_FORMAT_B8G8R8A8_UNORM stores bytes as B,G,R,A which on little-endian
+    // corresponds to SDL_PIXELFORMAT_ARGB8888
+    SDL_PixelFormat targetFmt = SDL_PIXELFORMAT_ARGB8888;
+    if (textureFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM) {
+        targetFmt = SDL_PIXELFORMAT_RGBA8888;
+    }
+    if (surface->format != targetFmt) {
+        SDL_Surface *converted = SDL_ConvertSurface(surface, targetFmt);
+        SDL_DestroySurface(surface);
+        if (!converted) {
+            core::Logger::instance().error("Renderer: Failed to convert surface format");
+            return nullptr;
+        }
+        surface = converted;
+    }
+
+    SDL_GPUTextureCreateInfo texInfo{};
+    texInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    texInfo.format = textureFormat;
+    texInfo.width = static_cast<Uint32>(surface->w);
+    texInfo.height = static_cast<Uint32>(surface->h);
+    texInfo.layer_count_or_depth = 1;
+    texInfo.num_levels = 1;
+    texInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    texInfo.props = 0;
+
+    SDL_GPUTexture *texture = SDL_CreateGPUTexture(_device, &texInfo);
+    if (!texture) {
+        core::Logger::instance().error("Renderer: Failed to create texture: {}",
+                                       SDL_GetError());
+        SDL_DestroySurface(surface);
+        return nullptr;
+    }
+    // Upload pixel data via transfer buffer
+    size_t dataSize = static_cast<size_t>(surface->pitch) * surface->h;
+    SDL_GPUTransferBufferCreateInfo xferInfo{};
+    xferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    xferInfo.size = static_cast<Uint32>(dataSize);
+    xferInfo.props = 0;
+    SDL_GPUTransferBuffer *xferBuf = SDL_CreateGPUTransferBuffer(_device, &xferInfo);
+    if (!xferBuf) {
+        core::Logger::instance().error("Renderer: Failed to create transfer buffer");
+        SDL_DestroySurface(surface);
+        SDL_ReleaseGPUTexture(_device, texture);
+        return nullptr;
+    }
+
+    void *mapped = SDL_MapGPUTransferBuffer(_device, xferBuf, false);
+    if (!mapped) {
+        core::Logger::instance().error("Renderer: Failed to map transfer buffer");
+        SDL_ReleaseGPUTransferBuffer(_device, xferBuf);
+        SDL_DestroySurface(surface);
+        SDL_ReleaseGPUTexture(_device, texture);
+        return nullptr;
+    }
+    SDL_memcpy(mapped, surface->pixels, dataSize);
+    SDL_UnmapGPUTransferBuffer(_device, xferBuf);
+
+    SDL_GPUCommandBuffer *uploadCmd = SDL_AcquireGPUCommandBuffer(_device);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(uploadCmd);
+
+    SDL_GPUTextureTransferInfo src{};
+    src.offset = 0;
+    src.transfer_buffer = xferBuf;
+
+    SDL_GPUTextureRegion dst{};
+    dst.texture = texture;
+    dst.mip_level = 0;
+    dst.layer = 0;
+    dst.x = 0;
+    dst.y = 0;
+    dst.z = 0;
+    dst.w = static_cast<Uint32>(surface->w);
+    dst.h = static_cast<Uint32>(surface->h);
+    dst.d = 1;
+
+    SDL_UploadToGPUTexture(copyPass, &src, &dst, false);
+    SDL_EndGPUCopyPass(copyPass);
+
+    SDL_SubmitGPUCommandBuffer(uploadCmd);
+    SDL_ReleaseGPUTransferBuffer(_device, xferBuf);
+    SDL_DestroySurface(surface);
+
+    return texture;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,17 +155,71 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         return false;
     }
 
-    // --- Load pipeline definition from JSON ---
-    auto pipelinePath = assetMgr.resolve(
-        core::NamespacedId("noix", "pipelines/solid.json"));
-    if (!pipelinePath.has_value()) {
-        core::Logger::instance().error(
-            "Renderer: Pipeline definition not found: noix:pipelines/solid.json");
+    // --- Load material ---
+    auto matPath = assetMgr.resolve(core::NamespacedId("noix", "materials/brick.json"));
+    if (!matPath.has_value()) {
+        core::Logger::instance().error("Renderer: Material not found: noix:materials/brick.json");
+        shutdown();
+        return false;
+    }
+    auto material = MaterialDef::load(matPath->string());
+    if (!material.has_value()) {
+        core::Logger::instance().error("Renderer: Failed to parse material");
         shutdown();
         return false;
     }
 
-    // Read and parse the JSON file
+    // --- Load geometry from NXMD ---
+    auto geomPath = assetMgr.resolve(core::NamespacedId("noix", "geometry/quad.nxmd"));
+    if (!geomPath.has_value()) {
+        core::Logger::instance().error(
+            "Renderer: Geometry not found: noix:geometry/quad.nxmd");
+        shutdown();
+        return false;
+    }
+    auto nxmdData = NxmdData::load(geomPath->string());
+    if (!nxmdData.has_value()) {
+        core::Logger::instance().error("Renderer: Failed to parse geometry");
+        shutdown();
+        return false;
+    }
+
+    auto geom = GeometryDef::create(_device, *nxmdData);
+    if (!geom.has_value()) {
+        core::Logger::instance().error("Renderer: Failed to create geometry GPU resources");
+        shutdown();
+        return false;
+    }
+    _geometry = std::move(*geom);
+
+    // --- Load texture ---
+    if (!material->textures().empty()) {
+        const auto &texBinding = material->textures().begin()->second;
+        auto texPath = assetMgr.resolve(texBinding.asset);
+        if (!texPath.has_value()) {
+            core::Logger::instance().error(
+                "Renderer: Texture not found: {}", texBinding.asset.toString());
+            shutdown();
+            return false;
+        }
+        SDL_GPUTextureFormat swapchainFmt =
+            SDL_GetGPUSwapchainTextureFormat(_device, _window);
+        _texture = loadTexture(texPath->string(), swapchainFmt);
+        if (!_texture) {
+            shutdown();
+            return false;
+        }
+    }
+
+    // --- Load pipeline ---
+    auto pipelinePath = assetMgr.resolve(material->pipeline());
+    if (!pipelinePath.has_value()) {
+        core::Logger::instance().error(
+            "Renderer: Pipeline not found: {}", material->pipeline().toString());
+        shutdown();
+        return false;
+    }
+
     std::ifstream file(*pipelinePath);
     if (!file.is_open()) {
         core::Logger::instance().error(
@@ -95,13 +232,12 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     auto pipelineVal = core::Value::parse(buf.str());
     auto pipelineDef = PipelineDef::parse(pipelineVal);
     if (!pipelineDef.has_value()) {
-        core::Logger::instance().error(
-            "Renderer: Failed to parse pipeline definition");
+        core::Logger::instance().error("Renderer: Failed to parse pipeline definition");
         shutdown();
         return false;
     }
-
-    // --- Load shaders referenced by the pipeline definition ---
+    // Load shaders
+    std::map<core::NamespacedId, SDL_GPUShader *> shaderMap;
     auto vsPath = assetMgr.resolve(pipelineDef->vertexShader());
     if (!vsPath.has_value()) {
         core::Logger::instance().error(
@@ -109,87 +245,25 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-
-    std::map<core::NamespacedId, SDL_GPUShader *> shaderMap;
     SDL_GPUShader *vs = loadShader(vsPath->string(), SDL_GPU_SHADERSTAGE_VERTEX);
-    if (!vs) {
-        shutdown();
-        return false;
-    }
+    if (!vs) { shutdown(); return false; }
     shaderMap[pipelineDef->vertexShader()] = vs;
 
     if (pipelineDef->fragmentShader().has_value()) {
-        const core::NamespacedId &fsId = pipelineDef->fragmentShader().value();
-        auto fsPath = assetMgr.resolve(fsId);
+        auto fsPath = assetMgr.resolve(*pipelineDef->fragmentShader());
         if (!fsPath.has_value()) {
             core::Logger::instance().error(
-                "Renderer: Fragment shader not found: {}", fsId.toString());
+                "Renderer: Fragment shader not found: {}", pipelineDef->fragmentShader()->toString());
             shutdown();
             return false;
         }
         SDL_GPUShader *fs = loadShader(fsPath->string(), SDL_GPU_SHADERSTAGE_FRAGMENT);
-        if (!fs) {
-            shutdown();
-            return false;
-        }
-        shaderMap[fsId] = fs;
+        if (!fs) { shutdown(); return false; }
+        shaderMap[*pipelineDef->fragmentShader()] = fs;
     }
 
-    // --- Create vertex buffer ---
-    const Uint32 vertexDataSize = sizeof(TRIANGLE_VERTICES);
-
-    SDL_GPUBufferCreateInfo bufInfo{};
-    bufInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    bufInfo.size = vertexDataSize;
-    bufInfo.props = 0;
-    _vertexBuffer = SDL_CreateGPUBuffer(_device, &bufInfo);
-    if (!_vertexBuffer) {
-        core::Logger::instance().error(
-            "Renderer: Failed to create vertex buffer: {}", SDL_GetError());
-        shutdown();
-        return false;
-    }
-
-    // --- Upload vertex data via transfer buffer ---
-    SDL_GPUTransferBufferCreateInfo xferInfo{};
-    xferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    xferInfo.size = vertexDataSize;
-    xferInfo.props = 0;
-    SDL_GPUTransferBuffer *xferBuf =
-        SDL_CreateGPUTransferBuffer(_device, &xferInfo);
-    if (!xferBuf) {
-        core::Logger::instance().error(
-            "Renderer: Failed to create transfer buffer: {}", SDL_GetError());
-        shutdown();
-        return false;
-    }
-
-    void *mapped = SDL_MapGPUTransferBuffer(_device, xferBuf, false);
-    SDL_memcpy(mapped, TRIANGLE_VERTICES, vertexDataSize);
-    SDL_UnmapGPUTransferBuffer(_device, xferBuf);
-
-    SDL_GPUCommandBuffer *uploadCmd = SDL_AcquireGPUCommandBuffer(_device);
-    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(uploadCmd);
-
-    SDL_GPUTransferBufferLocation src{};
-    src.offset = 0;
-    src.transfer_buffer = xferBuf;
-
-    SDL_GPUBufferRegion dst{};
-    dst.buffer = _vertexBuffer;
-    dst.offset = 0;
-    dst.size = vertexDataSize;
-
-    SDL_UploadToGPUBuffer(copyPass, &src, &dst, false);
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_SubmitGPUCommandBuffer(uploadCmd);
-    SDL_ReleaseGPUTransferBuffer(_device, xferBuf);
-
-    // --- Create graphics pipeline from PipelineDef ---
-    SDL_GPUTextureFormat swapchainFmt =
-        SDL_GetGPUSwapchainTextureFormat(_device, _window);
-
-    _pipeline = pipelineDef->createPipeline(_device, shaderMap, swapchainFmt);
+    _pipeline = pipelineDef->createPipeline(_device, shaderMap,
+        SDL_GetGPUSwapchainTextureFormat(_device, _window));
     if (!_pipeline) {
         core::Logger::instance().error(
             "Renderer: Failed to create graphics pipeline: {}", SDL_GetError());
@@ -197,9 +271,26 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         return false;
     }
 
-    // Release shader objects (pipeline now owns the compiled state)
+    // Release shader objects
     for (auto &[id, shader] : shaderMap) {
         SDL_ReleaseGPUShader(_device, shader);
+    }
+
+    // Create sampler for texture binding
+    if (_texture) {
+        SDL_GPUSamplerCreateInfo samplerInfo{};
+        samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+        samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+        samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+        samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+        samplerInfo.props = 0;
+        _sampler = SDL_CreateGPUSampler(_device, &samplerInfo);
+        if (!_sampler) {
+            core::Logger::instance().error(
+                "Renderer: Failed to create sampler: {}", SDL_GetError());
+            shutdown();
+            return false;
+        }
     }
 
     _initialized = true;
@@ -217,10 +308,15 @@ void Renderer::shutdown() {
         SDL_ReleaseGPUGraphicsPipeline(_device, _pipeline);
         _pipeline = nullptr;
     }
-    if (_vertexBuffer) {
-        SDL_ReleaseGPUBuffer(_device, _vertexBuffer);
-        _vertexBuffer = nullptr;
+    if (_texture) {
+        SDL_ReleaseGPUTexture(_device, _texture);
+        _texture = nullptr;
     }
+    if (_sampler) {
+        SDL_ReleaseGPUSampler(_device, _sampler);
+        _sampler = nullptr;
+    }
+    _geometry.destroy(_device);
 
     if (_window) {
         SDL_ReleaseWindowFromGPUDevice(_device, _window);
@@ -274,10 +370,19 @@ void Renderer::render() {
     SDL_SetGPUViewport(pass, &viewport);
 
     SDL_GPUBufferBinding vertexBinding{};
-    vertexBinding.buffer = _vertexBuffer;
+    vertexBinding.buffer = _geometry.vertexBuffer();
     vertexBinding.offset = 0;
     SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+    // Bind texture sampler
+    if (_texture && _sampler) {
+        SDL_GPUTextureSamplerBinding texBinding{};
+        texBinding.texture = _texture;
+        texBinding.sampler = _sampler;
+        SDL_BindGPUFragmentSamplers(pass, 0, &texBinding, 1);
+    }
+
+    SDL_DrawGPUPrimitives(pass, _geometry.indexCount(), 1, 0, 0);
 
     SDL_EndGPURenderPass(pass);
 

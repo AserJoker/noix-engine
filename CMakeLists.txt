@@ -140,14 +140,12 @@ else()
         set(SHADER_OUTPUTS "")
         foreach(SRC ${SHADER_SOURCES})
             file(RELATIVE_PATH REL_PATH "${SHADER_SRC_DIR}" ${SRC})
-            get_filename_component(REL_DIR ${REL_PATH} DIRECTORY)
-            get_filename_component(BASENAME ${SRC} NAME_WE)
 
-            set(SPV_FILE "${SHADER_BUILD_DIR}/${REL_DIR}/${BASENAME}.spv")
+            set(SPV_FILE "${SHADER_BUILD_DIR}/${REL_PATH}.spv")
 
             add_custom_command(
                 OUTPUT ${SPV_FILE}
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_BUILD_DIR}/${REL_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_BUILD_DIR}/${REL_PATH}"
                 COMMAND ${GLSLANG_VALIDATOR} -V "${SRC}" -o "${SPV_FILE}"
                 DEPENDS ${SRC}
                 COMMENT "Compiling shader: ${REL_PATH}"

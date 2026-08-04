@@ -1,0 +1,6 @@
+{
+  "pipeline": "noix:pipelines/textured",
+  "textures": {
+    "u_albedo": "noix:texture/brickwall.jpg"
+  }
+}
