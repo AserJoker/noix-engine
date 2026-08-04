@@ -4,11 +4,25 @@
   "primitive_type": "triangle_list",
   "vertex_input": {
     "buffers": [
-      { "slot": 0, "stride": 24, "input_rate": "vertex" }
+      {
+        "slot": 0,
+        "stride": 24,
+        "input_rate": "vertex"
+      }
     ],
     "attributes": [
-      { "location": 0, "buffer_slot": 0, "format": "float2", "offset": 0 },
-      { "location": 1, "buffer_slot": 0, "format": "float4", "offset": 8 }
+      {
+        "location": 0,
+        "buffer_slot": 0,
+        "format": "float2",
+        "offset": 0
+      },
+      {
+        "location": 1,
+        "buffer_slot": 0,
+        "format": "float4",
+        "offset": 8
+      }
     ]
   },
   "rasterizer": {
@@ -29,5 +43,7 @@
       }
     }
   ],
-  "multisample": { "sample_count": 1 }
+  "multisample": {
+    "sample_count": 1
+  }
 }

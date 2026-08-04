@@ -6,15 +6,15 @@
 
   "type": "object",
   "additionalProperties": false,
-  "required": ["vertex_shader", "fragment_shader"],
+  "required": ["vertex_shader"],
   "properties": {
     "vertex_shader": {
       "type": "string",
-      "description": "NamespacedId of the vertex shader (e.g. 'noix:shaders/solid/tri_color.spv')"
+      "description": "NamespacedId of the vertex shader (e.g. 'noix:shaders/solid/tri_color.spv'). Required."
     },
     "fragment_shader": {
       "type": "string",
-      "description": "NamespacedId of the fragment shader (e.g. 'noix:shaders/solid/color.spv')"
+      "description": "NamespacedId of the fragment shader (e.g. 'noix:shaders/solid/color.spv'). SDL3 GPU only supports vertex + fragment stages."
     },
     "primitive_type": {
       "type": "string",
