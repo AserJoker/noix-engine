@@ -2,18 +2,18 @@
 
 /*
  * Renderer — SDL3 GPU rendering backend.
- * Loads pipeline definitions and materials from JSON resources and renders geometry.
+ * Manages GPU resources via PipelineCache, TextureCache, MeshCache, MaterialCache.
  */
 
-#include "video/GeometryDef.h"
-#include "video/MaterialDef.h"
+#include "video/MaterialCache.h"
+#include "video/MeshCache.h"
+#include "video/PipelineCache.h"
+#include "video/TextureCache.h"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
 
-#include <array>
-#include <map>
-#include <string>
+#include <vector>
 
 namespace noix::runtime { class AssetManager; }
 namespace noix::core { class NamespacedId; }
@@ -28,31 +28,44 @@ public:
   Renderer(const Renderer &) = delete;
   Renderer &operator=(const Renderer &) = delete;
 
-  /// Initialize GPU device, claim the window, and load the default scene.
+  /// Initialize GPU device, claim the window, and load builtin resources.
   bool init(SDL_Window *window, runtime::AssetManager &assetMgr);
 
-  /// Shut down and release GPU resources.
+  /// Shut down and release all GPU resources.
   void shutdown();
 
   /// Render the frame.
   void render();
 
+  /// Batch diff-update all resource caches.
+  void updateResources(const std::vector<core::NamespacedId> &pipelineIds,
+                       const std::vector<core::NamespacedId> &textureIds,
+                       const std::vector<core::NamespacedId> &meshIds,
+                       const std::vector<core::NamespacedId> &materialIds);
+
+  PipelineCache &pipelineCache() { return _pipelineCache; }
+  TextureCache &textureCache() { return _textureCache; }
+  MeshCache &meshCache() { return _meshCache; }
+  MaterialCache &materialCache() { return _materialCache; }
+
 private:
   SDL_GPUDevice *_device = nullptr;
   SDL_Window *_window = nullptr;
+  runtime::AssetManager *_assetMgr = nullptr;
   bool _initialized = false;
 
-  GeometryDef _geometry;
-  SDL_GPUGraphicsPipeline *_pipeline = nullptr;
-  SDL_GPUTexture *_texture = nullptr;
-  SDL_GPUSampler *_sampler = nullptr;
+  PipelineCache _pipelineCache;
+  TextureCache _textureCache;
+  MeshCache _meshCache;
+  MaterialCache _materialCache;
 
   glm::mat4 _view{1.0f};
   glm::mat4 _proj{1.0f};
 
-  SDL_GPUShader *loadShader(const std::string &absolutePath,
-                            SDL_GPUShaderStage stage);
-  SDL_GPUTexture *loadTexture(const std::string &absolutePath);
+  ResourceHandle _defaultPipeline;
+  ResourceHandle _defaultTexture;
+  ResourceHandle _defaultMesh;
+  ResourceHandle _defaultMaterial;
 };
 
 } // namespace noix::video

@@ -113,6 +113,7 @@ struct MultisampleDef {
 // ---- PipelineDef ----
 
 class PipelineDef {
+    friend class PipelineCache;
 public:
     /// Parse from a Value (JSON). Returns nullopt on failure.
     static std::optional<PipelineDef> parse(const core::Value &v);

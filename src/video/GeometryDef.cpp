@@ -162,6 +162,111 @@ std::optional<GeometryDef> GeometryDef::create(SDL_GPUDevice *device,
     return geom;
 }
 
+std::optional<GeometryDef> GeometryDef::createBuiltinQuad(SDL_GPUDevice *device) {
+    // 4 vertices: position (float2) + texcoord (float2), stride = 16 bytes
+    // NDC coordinates: (-0.5,-0.5) to (0.5,0.5)
+    struct Vertex { float x, y, u, v; };
+    Vertex verts[4] = {
+        {-0.5f, -0.5f, 0.0f, 0.0f}, // top-left
+        { 0.5f, -0.5f, 1.0f, 0.0f}, // top-right
+        {-0.5f,  0.5f, 0.0f, 1.0f}, // bottom-left
+        { 0.5f,  0.5f, 1.0f, 1.0f}, // bottom-right
+    };
+    uint16_t indices[6] = {0, 1, 2, 2, 1, 3};
+
+    GeometryDef geom;
+
+    // Vertex buffer
+    SDL_GPUBufferCreateInfo vbInfo{};
+    vbInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    vbInfo.size = sizeof(verts);
+    vbInfo.props = 0;
+    geom._vertexBuffer = SDL_CreateGPUBuffer(device, &vbInfo);
+    if (!geom._vertexBuffer) return std::nullopt;
+
+    // Index buffer
+    SDL_GPUBufferCreateInfo ibInfo{};
+    ibInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+    ibInfo.size = sizeof(indices);
+    ibInfo.props = 0;
+    geom._indexBuffer = SDL_CreateGPUBuffer(device, &ibInfo);
+    if (!geom._indexBuffer) {
+        SDL_ReleaseGPUBuffer(device, geom._vertexBuffer);
+        return std::nullopt;
+    }
+
+    // Upload via transfer buffer
+    size_t totalSize = sizeof(verts) + sizeof(indices);
+    SDL_GPUTransferBufferCreateInfo xferInfo{};
+    xferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    xferInfo.size = static_cast<Uint32>(totalSize);
+    xferInfo.props = 0;
+    SDL_GPUTransferBuffer *xferBuf = SDL_CreateGPUTransferBuffer(device, &xferInfo);
+    if (!xferBuf) {
+        SDL_ReleaseGPUBuffer(device, geom._vertexBuffer);
+        SDL_ReleaseGPUBuffer(device, geom._indexBuffer);
+        return std::nullopt;
+    }
+
+    void *mapped = SDL_MapGPUTransferBuffer(device, xferBuf, false);
+    if (!mapped) {
+        SDL_ReleaseGPUTransferBuffer(device, xferBuf);
+        SDL_ReleaseGPUBuffer(device, geom._vertexBuffer);
+        SDL_ReleaseGPUBuffer(device, geom._indexBuffer);
+        return std::nullopt;
+    }
+    SDL_memcpy(mapped, verts, sizeof(verts));
+    SDL_memcpy(static_cast<uint8_t *>(mapped) + sizeof(verts), indices, sizeof(indices));
+    SDL_UnmapGPUTransferBuffer(device, xferBuf);
+
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
+
+    // Upload vertex buffer
+    SDL_GPUCopyPass *vCopy = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTransferBufferLocation vSrc{};
+    vSrc.offset = 0;
+    vSrc.transfer_buffer = xferBuf;
+    SDL_GPUBufferRegion vDst{};
+    vDst.buffer = geom._vertexBuffer;
+    vDst.offset = 0;
+    vDst.size = sizeof(verts);
+    SDL_UploadToGPUBuffer(vCopy, &vSrc, &vDst, false);
+    SDL_EndGPUCopyPass(vCopy);
+
+    // Upload index buffer
+    SDL_GPUCopyPass *iCopy = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTransferBufferLocation iSrc{};
+    iSrc.offset = sizeof(verts);
+    iSrc.transfer_buffer = xferBuf;
+    SDL_GPUBufferRegion iDst{};
+    iDst.buffer = geom._indexBuffer;
+    iDst.offset = 0;
+    iDst.size = sizeof(indices);
+    SDL_UploadToGPUBuffer(iCopy, &iSrc, &iDst, false);
+    SDL_EndGPUCopyPass(iCopy);
+
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device, xferBuf);
+
+    // Metadata
+    geom._vertexCount = 4;
+    geom._indexCount = 6;
+    geom._indexType = SDL_GPU_INDEXELEMENTSIZE_16BIT;
+
+    // Vertex layout
+    SDL_GPUVertexBufferDescription vbDesc{};
+    vbDesc.slot = 0;
+    vbDesc.pitch = sizeof(Vertex);
+    vbDesc.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vbDesc.instance_step_rate = 0;
+    geom._vertexBuffers.push_back(vbDesc);
+
+    geom._attributes.push_back({0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 0});
+    geom._attributes.push_back({1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 8});
+
+    return geom;
+}
+
 void GeometryDef::destroy(SDL_GPUDevice *device) {
     if (_vertexBuffer) {
         SDL_ReleaseGPUBuffer(device, _vertexBuffer);

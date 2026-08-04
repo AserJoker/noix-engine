@@ -32,3 +32,12 @@ private:
 };
 
 } // namespace noix::core
+
+template <>
+struct std::hash<noix::core::NamespacedId> {
+    size_t operator()(const noix::core::NamespacedId &id) const noexcept {
+        size_t h1 = std::hash<std::string>{}(id.ns());
+        size_t h2 = std::hash<std::string>{}(id.name());
+        return h1 ^ (h2 << 1);
+    }
+};

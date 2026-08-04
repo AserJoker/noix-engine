@@ -19,6 +19,9 @@ public:
     static std::optional<GeometryDef> create(SDL_GPUDevice *device,
                                              const NxmdData &data);
 
+    /// Create builtin unit quad (2D positions + UVs).
+    static std::optional<GeometryDef> createBuiltinQuad(SDL_GPUDevice *device);
+
     SDL_GPUBuffer *vertexBuffer() const { return _vertexBuffer; }
     SDL_GPUBuffer *indexBuffer() const { return _indexBuffer; }
     uint32_t vertexCount() const { return _vertexCount; }
