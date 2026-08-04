@@ -9,7 +9,9 @@
 #include "video/MaterialDef.h"
 
 #include <SDL3/SDL_gpu.h>
+#include <glm/mat4x4.hpp>
 
+#include <array>
 #include <map>
 #include <string>
 
@@ -44,6 +46,9 @@ private:
   SDL_GPUGraphicsPipeline *_pipeline = nullptr;
   SDL_GPUTexture *_texture = nullptr;
   SDL_GPUSampler *_sampler = nullptr;
+
+  glm::mat4 _view{1.0f};
+  glm::mat4 _proj{1.0f};
 
   SDL_GPUShader *loadShader(const std::string &absolutePath,
                             SDL_GPUShaderStage stage);

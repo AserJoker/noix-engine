@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <fstream>
 #include <sstream>
@@ -29,6 +30,7 @@ SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
     createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
     createInfo.stage = stage;
     createInfo.num_samplers = (stage == SDL_GPU_SHADERSTAGE_FRAGMENT) ? 1 : 0;
+    createInfo.num_uniform_buffers = (stage == SDL_GPU_SHADERSTAGE_VERTEX) ? 1 : 0;
 
     SDL_GPUShader *shader = SDL_CreateGPUShader(_device, &createInfo);
     SDL_free(code);
@@ -287,6 +289,12 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         }
     }
 
+    // Set up transform matrices.
+    // View = identity; Projection = identity (geometry is in NDC space).
+    // When using pixel-space geometry, set projection to orthographic.
+    _view = glm::mat4(1.0f);
+    _proj = glm::mat4(1.0f);
+
     _initialized = true;
     core::Logger::instance().info("Renderer: GPU device initialized (driver: {})",
                                   SDL_GetGPUDeviceDriver(_device));
@@ -362,6 +370,12 @@ void Renderer::render() {
     viewport.min_depth = 0.0f;
     viewport.max_depth = 1.0f;
     SDL_SetGPUViewport(pass, &viewport);
+
+    // Push transform uniforms (std140 aligned)
+    struct { glm::mat4 view; glm::mat4 proj; } transformData;
+    transformData.view = _view;
+    transformData.proj = _proj;
+    SDL_PushGPUVertexUniformData(cmdBuf, 0, &transformData, sizeof(transformData));
 
     SDL_GPUBufferBinding vertexBinding{};
     vertexBinding.buffer = _geometry.vertexBuffer();
