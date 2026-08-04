@@ -103,27 +103,37 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
 
     // --- Load shaders referenced by the pipeline definition ---
     auto vsPath = assetMgr.resolve(pipelineDef->vertexShader);
-    auto fsPath = assetMgr.resolve(pipelineDef->fragmentShader);
-    if (!vsPath.has_value() || !fsPath.has_value()) {
+    if (!vsPath.has_value()) {
         core::Logger::instance().error(
-            "Renderer: Shader not found: vs={}, fs={}",
-            pipelineDef->vertexShader.toString(),
-            pipelineDef->fragmentShader.toString());
+            "Renderer: Vertex shader not found: {}", pipelineDef->vertexShader.toString());
         shutdown();
         return false;
     }
 
     std::map<core::NamespacedId, SDL_GPUShader *> shaderMap;
     SDL_GPUShader *vs = loadShader(vsPath->string(), SDL_GPU_SHADERSTAGE_VERTEX);
-    SDL_GPUShader *fs = loadShader(fsPath->string(), SDL_GPU_SHADERSTAGE_FRAGMENT);
-    if (!vs || !fs) {
-        if (vs) SDL_ReleaseGPUShader(_device, vs);
-        if (fs) SDL_ReleaseGPUShader(_device, fs);
+    if (!vs) {
         shutdown();
         return false;
     }
     shaderMap[pipelineDef->vertexShader] = vs;
-    shaderMap[pipelineDef->fragmentShader] = fs;
+
+    if (pipelineDef->fragmentShader.has_value()) {
+        const core::NamespacedId &fsId = pipelineDef->fragmentShader.value();
+        auto fsPath = assetMgr.resolve(fsId);
+        if (!fsPath.has_value()) {
+            core::Logger::instance().error(
+                "Renderer: Fragment shader not found: {}", fsId.toString());
+            shutdown();
+            return false;
+        }
+        SDL_GPUShader *fs = loadShader(fsPath->string(), SDL_GPU_SHADERSTAGE_FRAGMENT);
+        if (!fs) {
+            shutdown();
+            return false;
+        }
+        shaderMap[fsId] = fs;
+    }
 
     // --- Create vertex buffer ---
     const Uint32 vertexDataSize = sizeof(TRIANGLE_VERTICES);

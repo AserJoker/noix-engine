@@ -426,12 +426,15 @@ std::optional<PipelineDef> PipelineDef::parse(const core::Value &v) {
 
     PipelineDef def;
 
-    // Shaders (required)
+    // Shaders
     auto vsStr = v["vertex_shader"].asString();
-    auto fsStr = v["fragment_shader"].asString();
-    if (vsStr.empty() || fsStr.empty()) return std::nullopt;
+    if (vsStr.empty()) return std::nullopt;
     def.vertexShader = core::NamespacedId::parse(vsStr);
-    def.fragmentShader = core::NamespacedId::parse(fsStr);
+
+    auto fsStr = v["fragment_shader"].asString();
+    if (!fsStr.empty()) {
+        def.fragmentShader = core::NamespacedId::parse(fsStr);
+    }
 
     // Primitive type
     def.primitiveType = toSDLPrimitiveType(v["primitive_type"].asString("triangle_list"));
@@ -551,7 +554,11 @@ core::Value PipelineDef::dump() const {
     auto obj = core::Value::object();
 
     obj.asObject()["vertex_shader"] = core::Value(vertexShader.toString());
-    obj.asObject()["fragment_shader"] = core::Value(fragmentShader.toString());
+    if (fragmentShader.has_value()) {
+        obj.asObject()["fragment_shader"] = core::Value(fragmentShader->toString());
+    } else {
+        obj.asObject()["fragment_shader"] = core::Value();
+    }
     obj.asObject()["primitive_type"] = core::Value(fromSDLPrimitiveType(primitiveType));
 
     // Vertex input
@@ -674,9 +681,14 @@ SDL_GPUGraphicsPipeline *PipelineDef::createPipeline(
 
     // Shaders
     auto vsIt = shaderMap.find(vertexShader);
-    auto fsIt = shaderMap.find(fragmentShader);
     info.vertex_shader = (vsIt != shaderMap.end()) ? vsIt->second : nullptr;
-    info.fragment_shader = (fsIt != shaderMap.end()) ? fsIt->second : nullptr;
+
+    if (fragmentShader.has_value()) {
+        auto fsIt = shaderMap.find(*fragmentShader);
+        info.fragment_shader = (fsIt != shaderMap.end()) ? fsIt->second : nullptr;
+    } else {
+        info.fragment_shader = nullptr;
+    }
 
     // Primitive type
     info.primitive_type = primitiveType;

@@ -114,7 +114,7 @@ struct MultisampleDef {
 
 struct PipelineDef {
     core::NamespacedId vertexShader;
-    core::NamespacedId fragmentShader;
+    std::optional<core::NamespacedId> fragmentShader;
 
     SDL_GPUPrimitiveType primitiveType = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 
