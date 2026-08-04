@@ -18,8 +18,10 @@ namespace noix::video {
 
 struct TextureBinding {
     core::NamespacedId asset;
-    // Sampler defaults: min_filter=linear, mag_filter=linear,
-    //                   address_mode_u=repeat, address_mode_v=repeat
+    // Optional texture format override (e.g. "r8g8b8a8_unorm").
+    // If empty, the original image format is preserved.
+    std::string format;
+    // Sampler defaults
     std::string minFilter = "linear";
     std::string magFilter = "linear";
     std::string addressModeU = "repeat";

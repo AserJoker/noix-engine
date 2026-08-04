@@ -40,21 +40,42 @@ SDL_GPUShader *Renderer::loadShader(const std::string &absolutePath,
     return shader;
 }
 
-SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath) {
+SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath,
+                                       const std::string &formatOverride) {
     SDL_Surface *surface = IMG_Load(absolutePath.c_str());
     if (!surface) {
         core::Logger::instance().error("Renderer: Failed to load image: {}", SDL_GetError());
         return nullptr;
     }
 
-    // Convert surface to RGBA8888 — the canonical texture format.
-    // The GPU texture is always R8G8B8A8_UNORM; Vulkan handles format
-    // conversion when writing to the swapchain automatically.
-    if (surface->format != SDL_PIXELFORMAT_RGBA8888) {
-        SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA8888);
+    // Determine GPU texture format: use material override if specified,
+    // otherwise match the swapchain format (required for correct shader output).
+    // Vulkan interprets fragment shader output according to the render target format,
+    // so the texture data layout must match it.
+    SDL_GPUTextureFormat texFmt;
+    if (!formatOverride.empty()) {
+        texFmt = toSDLTextureFormat(formatOverride);
+        if (texFmt == SDL_GPU_TEXTUREFORMAT_INVALID) {
+            core::Logger::instance().error(
+                "Renderer: Invalid texture format override: {}", formatOverride);
+            SDL_DestroySurface(surface);
+            return nullptr;
+        }
+    } else {
+        texFmt = SDL_GetGPUSwapchainTextureFormat(_device, _window);
+    }
+
+    // Map the GPU texture format to the corresponding SDL pixel format for conversion.
+    SDL_PixelFormat sdlFmt = SDL_PIXELFORMAT_ARGB8888;
+    if (texFmt == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM) {
+        sdlFmt = SDL_PIXELFORMAT_RGBA8888;
+    }
+
+    if (surface->format != sdlFmt) {
+        SDL_Surface *converted = SDL_ConvertSurface(surface, sdlFmt);
         SDL_DestroySurface(surface);
         if (!converted) {
-            core::Logger::instance().error("Renderer: Failed to convert surface to RGBA8888");
+            core::Logger::instance().error("Renderer: Failed to convert surface format");
             return nullptr;
         }
         surface = converted;
@@ -62,7 +83,7 @@ SDL_GPUTexture *Renderer::loadTexture(const std::string &absolutePath) {
 
     SDL_GPUTextureCreateInfo texInfo{};
     texInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    texInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    texInfo.format = texFmt;
     texInfo.width = static_cast<Uint32>(surface->w);
     texInfo.height = static_cast<Uint32>(surface->h);
     texInfo.layer_count_or_depth = 1;
@@ -197,7 +218,7 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
             shutdown();
             return false;
         }
-        _texture = loadTexture(texPath->string());
+        _texture = loadTexture(texPath->string(), texBinding.format);
         if (!_texture) {
             shutdown();
             return false;

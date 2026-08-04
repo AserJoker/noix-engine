@@ -53,10 +53,10 @@ std::optional<MaterialDef> MaterialDef::load(const std::string &path) {
             TextureBinding binding;
 
             if (val.isString()) {
-                // Shorthand: "u_albedo": "noix:textures/metal"
+                // Shorthand: "u_albedo": "noix:texture/brickwall.jpg"
                 binding.asset = core::NamespacedId::parse(val.asString());
             } else if (val.isObject()) {
-                // Full form: "u_albedo": { "asset": "...", "min_filter": "linear", ... }
+                // Full form: "u_albedo": { "asset": "...", "format": "r8g8b8a8_unorm", ... }
                 auto assetStr = val["asset"].asString();
                 if (assetStr.empty()) {
                     core::Logger::instance().error(
@@ -64,6 +64,7 @@ std::optional<MaterialDef> MaterialDef::load(const std::string &path) {
                     continue;
                 }
                 binding.asset = core::NamespacedId::parse(assetStr);
+                binding.format = val["format"].asString("");
                 binding.minFilter = val["min_filter"].asString("linear");
                 binding.magFilter = val["mag_filter"].asString("linear");
                 binding.addressModeU = val["address_mode_u"].asString("repeat");
@@ -98,6 +99,9 @@ core::Value MaterialDef::dump() const {
     for (const auto &[key, binding] : _textures) {
         auto bObj = core::Value::object();
         bObj.asObject()["asset"] = core::Value(binding.asset.toString());
+        if (!binding.format.empty()) {
+            bObj.asObject()["format"] = core::Value(binding.format);
+        }
         bObj.asObject()["min_filter"] = core::Value(binding.minFilter);
         bObj.asObject()["mag_filter"] = core::Value(binding.magFilter);
         bObj.asObject()["address_mode_u"] = core::Value(binding.addressModeU);
