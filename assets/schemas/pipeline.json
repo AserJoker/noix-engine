@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "noix:schemas/pipeline",
+  "title": "PipelineDef",
+  "description": "Serializable graphics pipeline definition mirroring SDL_GPUGraphicsPipelineCreateInfo.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["vertex_shader", "fragment_shader"],
+  "properties": {
+    "vertex_shader": {
+      "type": "string",
+      "description": "NamespacedId of the vertex shader (e.g. 'noix:shaders/solid/tri_color.spv')"
+    },
+    "fragment_shader": {
+      "type": "string",
+      "description": "NamespacedId of the fragment shader (e.g. 'noix:shaders/solid/color.spv')"
+    },
+    "primitive_type": {
+      "type": "string",
+      "enum": ["triangle_list", "triangle_strip", "line_list", "line_strip", "point_list"],
+      "default": "triangle_list",
+      "description": "Primitive topology"
+    },
+    "vertex_input": {
+      "$ref": "#/$defs/VertexInput"
+    },
+    "rasterizer": {
+      "$ref": "#/$defs/Rasterizer"
+    },
+    "depth_stencil": {
+      "$ref": "#/$defs/DepthStencil"
+    },
+    "color_targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ColorTarget" },
+      "description": "Color target descriptions. 'swapchain' format uses the swapchain texture format at creation time."
+    },
+    "multisample": {
+      "$ref": "#/$defs/Multisample"
+    }
+  },
+
+  "$defs": {
+    "VertexBuffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "stride"],
+      "properties": {
+        "slot": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Binding slot of the vertex buffer"
+        },
+        "stride": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Byte stride between elements"
+        },
+        "input_rate": {
+          "type": "string",
+          "enum": ["vertex", "instance"],
+          "default": "vertex",
+          "description": "Whether addressing is per-vertex or per-instance"
+        }
+      }
+    },
+
+    "VertexAttribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["location", "buffer_slot", "format", "offset"],
+      "properties": {
+        "location": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Shader input location index"
+        },
+        "buffer_slot": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Binding slot of the associated vertex buffer"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "float2", "float3", "float4",
+            "byte2_norm", "byte4_norm",
+            "ubyte2_norm", "ubyte4_norm",
+            "short2_norm", "short4_norm",
+            "ushort2_norm", "ushort4_norm"
+          ],
+          "description": "Vertex element format"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Byte offset of this attribute relative to the start of the vertex"
+        }
+      }
+    },
+
+    "VertexInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "buffers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/VertexBuffer" }
+        },
+        "attributes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/VertexAttribute" }
+        }
+      }
+    },
+
+    "Rasterizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fill_mode": {
+          "type": "string",
+          "enum": ["fill", "line"],
+          "default": "fill"
+        },
+        "cull_mode": {
+          "type": "string",
+          "enum": ["none", "front", "back"],
+          "default": "none"
+        },
+        "front_face": {
+          "type": "string",
+          "enum": ["counter_clockwise", "clockwise"],
+          "default": "counter_clockwise"
+        },
+        "depth_bias_constant_factor": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Scalar factor controlling the depth value added to each fragment"
+        },
+        "depth_bias_clamp": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Maximum depth bias of a fragment"
+        },
+        "depth_bias_slope_factor": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Scalar factor applied to a fragment's slope in depth calculations"
+        },
+        "enable_depth_bias": {
+          "type": "boolean",
+          "default": false
+        },
+        "enable_depth_clip": {
+          "type": "boolean",
+          "default": true,
+          "description": "true to enable depth clip, false to enable depth clamp"
+        }
+      }
+    },
+
+    "StencilOpDef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fail_op": {
+          "type": "string",
+          "enum": ["keep", "zero", "replace", "increment_and_clamp", "decrement_and_clamp", "invert", "increment_and_wrap", "decrement_and_wrap"],
+          "default": "keep"
+        },
+        "pass_op": {
+          "type": "string",
+          "enum": ["keep", "zero", "replace", "increment_and_clamp", "decrement_and_clamp", "invert", "increment_and_wrap", "decrement_and_wrap"],
+          "default": "keep"
+        },
+        "depth_fail_op": {
+          "type": "string",
+          "enum": ["keep", "zero", "replace", "increment_and_clamp", "decrement_and_clamp", "invert", "increment_and_wrap", "decrement_and_wrap"],
+          "default": "keep"
+        },
+        "compare_op": {
+          "type": "string",
+          "enum": ["never", "less", "equal", "less_or_equal", "greater", "not_equal", "greater_or_equal", "always"],
+          "default": "always"
+        }
+      }
+    },
+
+    "DepthStencil": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compare_op": {
+          "type": "string",
+          "enum": ["never", "less", "equal", "less_or_equal", "greater", "not_equal", "greater_or_equal", "always"],
+          "default": "less"
+        },
+        "back_stencil": { "$ref": "#/$defs/StencilOpDef" },
+        "front_stencil": { "$ref": "#/$defs/StencilOpDef" },
+        "compare_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 255,
+          "description": "Bits of the stencil values participating in the stencil test"
+        },
+        "write_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 255,
+          "description": "Bits of the stencil values updated by the stencil test"
+        },
+        "enable_depth_test": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_depth_write": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_stencil_test": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+
+    "BlendState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "src_color": {
+          "type": "string",
+          "enum": ["zero", "one", "src_color", "one_minus_src_color", "dst_color", "one_minus_dst_color", "src_alpha", "one_minus_src_alpha", "dst_alpha", "one_minus_dst_alpha"],
+          "default": "src_alpha"
+        },
+        "dst_color": {
+          "type": "string",
+          "enum": ["zero", "one", "src_color", "one_minus_src_color", "dst_color", "one_minus_dst_color", "src_alpha", "one_minus_src_alpha", "dst_alpha", "one_minus_dst_alpha"],
+          "default": "one_minus_src_alpha"
+        },
+        "color_op": {
+          "type": "string",
+          "enum": ["add", "subtract", "reverse_subtract", "min", "max"],
+          "default": "add"
+        },
+        "src_alpha": {
+          "type": "string",
+          "enum": ["zero", "one", "src_color", "one_minus_src_color", "dst_color", "one_minus_dst_color", "src_alpha", "one_minus_src_alpha", "dst_alpha", "one_minus_dst_alpha"],
+          "default": "one"
+        },
+        "dst_alpha": {
+          "type": "string",
+          "enum": ["zero", "one", "src_color", "one_minus_src_color", "dst_color", "one_minus_dst_color", "src_alpha", "one_minus_src_alpha", "dst_alpha", "one_minus_dst_alpha"],
+          "default": "one_minus_src_alpha"
+        },
+        "alpha_op": {
+          "type": "string",
+          "enum": ["add", "subtract", "reverse_subtract", "min", "max"],
+          "default": "add"
+        },
+        "color_write_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15,
+          "default": 15,
+          "description": "Bitmask for RGBA write channels (0xF = all enabled)"
+        },
+        "enable_blend": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_color_write_mask": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+
+    "ColorTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "swapchain",
+          "description": "Texture format. 'swapchain' resolves to the swapchain format at creation time, or a specific SDL_GPUTextureFormat string"
+        },
+        "blend": { "$ref": "#/$defs/BlendState" }
+      }
+    },
+
+    "Multisample": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sample_count": {
+          "type": "integer",
+          "enum": [1, 2, 4, 8],
+          "default": 1,
+          "description": "Number of MSAA samples"
+        },
+        "sample_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Reserved. Must be 0."
+        },
+        "enable_alpha_to_coverage": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}
