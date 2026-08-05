@@ -2,11 +2,31 @@
 #include "core/Logger.h"
 #include "core/NamespacedId.h"
 #include "runtime/AssetManager.h"
+#include "video/Image.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace noix::video {
+
+// --- Builtin checkerboard texture (2x2 white/gray) ---
+
+static SurfaceRef createBuiltinCheckerboard() {
+    // R8G8B8A8_UNORM on x86 LE: byte0=R, byte1=G, byte2=B, byte3=A
+    uint32_t pixels[4] = {
+        0xFFFFFFFF, // white
+        0xFFA0A0A0, // gray
+        0xFFA0A0A0, // gray
+        0xFFFFFFFF  // white
+    };
+    SDL_Surface *surface = SDL_CreateSurfaceFrom(
+        2, 2, SDL_PIXELFORMAT_ABGR8888,
+        pixels, 2 * 4);
+    if (!surface) return nullptr;
+    return SurfaceRef(surface, [](SDL_Surface *s) { if (s) SDL_DestroySurface(s); });
+}
+
+// ---------------------------------------------------------------------------
 
 bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     _window = window;
@@ -32,7 +52,6 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
 
     // Register builtin IDs
     _pipelineCache.addBuiltin(core::NamespacedId("noix", "pipelines/textured.json"));
-    _textureCache.addBuiltin(core::NamespacedId("noix", "builtin-default"));
     _meshCache.addBuiltin(core::NamespacedId("noix", "geometry/quad.nxmd"));
 
     // Load builtin pipeline
@@ -46,10 +65,18 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         return false;
     }
 
-    // Load builtin texture (1x1 white pixel)
-    _defaultTexture = _textureCache.create(
+    // Load builtin texture (2x2 checkerboard, code-generated)
+    auto checkerboard = createBuiltinCheckerboard();
+    if (!checkerboard) {
+        core::Logger::instance().error(
+            "Renderer: Failed to create builtin checkerboard surface");
+        shutdown();
+        return false;
+    }
+    _defaultTexture = Texture::resolve(
         core::NamespacedId("noix", "builtin-default"),
-        _device, assetMgr);
+        checkerboard, "",
+        core::ResourceMode::Dynamic);
     if (!_defaultTexture.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin texture");
@@ -87,10 +114,13 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
 void Renderer::shutdown() {
     if (!_initialized && !_device) return;
 
+    // Release GPU resources BEFORE destroying the device.
+    // Texture/Image destructors call Application::renderer().gpuDevice().
     _materialCache = MaterialCache();
     _meshCache = MeshCache();
-    _textureCache = TextureCache();
     _pipelineCache = PipelineCache();
+    Texture::slotMap().clear();
+    Image::slotMap().clear();
 
     if (_window) {
         SDL_ReleaseWindowFromGPUDevice(_device, _window);
@@ -105,7 +135,6 @@ void Renderer::shutdown() {
 
 void Renderer::updateResources(
     const std::vector<core::NamespacedId> &pipelineIds,
-    const std::vector<core::NamespacedId> &textureIds,
     const std::vector<core::NamespacedId> &meshIds,
     const std::vector<core::NamespacedId> &materialIds) {
     if (!_initialized) return;
@@ -113,9 +142,7 @@ void Renderer::updateResources(
     SDL_GPUTextureFormat swapchainFmt =
         SDL_GetGPUSwapchainTextureFormat(_device, _window);
 
-    // Update in dependency order: pipelines → textures → meshes → materials
     _pipelineCache.update(pipelineIds, _device, *_assetMgr, swapchainFmt);
-    _textureCache.update(textureIds, _device, *_assetMgr);
     _meshCache.update(meshIds, _device, *_assetMgr);
     _materialCache.update(materialIds, *_assetMgr);
 }
@@ -178,13 +205,12 @@ void Renderer::render() {
         SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
     }
 
-    // Bind texture sampler (builtin default checkerboard)
-    SDL_GPUTexture *texture = _textureCache.get(_defaultTexture);
-    SDL_GPUSampler *sampler = _textureCache.getSampler(_defaultTexture);
-    if (texture && sampler) {
+    // Bind texture sampler (builtin checkerboard)
+    Texture *tex = _defaultTexture.get();
+    if (tex && tex->gpuTexture() && tex->gpuSampler()) {
         SDL_GPUTextureSamplerBinding bind{};
-        bind.texture = texture;
-        bind.sampler = sampler;
+        bind.texture = tex->gpuTexture();
+        bind.sampler = tex->gpuSampler();
         SDL_BindGPUFragmentSamplers(pass, 0, &bind, 1);
     }
 
