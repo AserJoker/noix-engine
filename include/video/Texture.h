@@ -31,10 +31,14 @@ public:
     }
 
     /// Create a Texture from a SurfaceRef and insert into SlotMap.
+    /// targetFormat: if specified, convert surface to match; if nullopt, preserve original format.
     static Handle resolve(const core::NamespacedId &id,
                           const SurfaceRef &surface,
                           std::filesystem::path filePath,
-                          core::ResourceMode mode = core::ResourceMode::Dynamic);
+                          core::ResourceMode mode = core::ResourceMode::Dynamic,
+                          std::optional<SDL_GPUTextureFormat> targetFormat = std::nullopt,
+                          SDL_GPUFilter minFilter = SDL_GPU_FILTER_LINEAR,
+                          SDL_GPUFilter magFilter = SDL_GPU_FILTER_LINEAR);
 
     // --- Accessors ---
 
@@ -44,6 +48,12 @@ public:
     uint32_t height() const { return _height; }
 
     ~Texture() override;
+
+    Texture(Texture &&other) noexcept;
+    Texture &operator=(Texture &&other) noexcept;
+
+    Texture(const Texture &) = delete;
+    Texture &operator=(const Texture &) = delete;
 
 private:
     Texture(const core::NamespacedId &id,

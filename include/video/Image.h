@@ -53,6 +53,9 @@ public:
 
     ~Image() override = default;
 
+    Image(Image &&) = default;
+    Image &operator=(Image &&) = default;
+
 private:
     SurfaceRef decodeSurface() const;
     Image(const core::NamespacedId &id,

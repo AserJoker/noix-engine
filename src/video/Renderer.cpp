@@ -12,17 +12,13 @@ namespace noix::video {
 // --- Builtin checkerboard texture (2x2 white/gray) ---
 
 static SurfaceRef createBuiltinCheckerboard() {
-    // R8G8B8A8_UNORM on x86 LE: byte0=R, byte1=G, byte2=B, byte3=A
-    uint32_t pixels[4] = {
-        0xFFFFFFFF, // white
-        0xFFA0A0A0, // gray
-        0xFFA0A0A0, // gray
-        0xFFFFFFFF  // white
-    };
-    SDL_Surface *surface = SDL_CreateSurfaceFrom(
-        2, 2, SDL_PIXELFORMAT_ABGR8888,
-        pixels, 2 * 4);
+    SDL_Surface *surface = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_ABGR8888);
     if (!surface) return nullptr;
+    auto *pixels = static_cast<uint32_t *>(surface->pixels);
+    pixels[0] = 0xFFFFFFFF; // white
+    pixels[1] = 0xFFA0A0A0; // gray
+    pixels[2] = 0xFFA0A0A0; // gray
+    pixels[3] = 0xFFFFFFFF; // white
     return SurfaceRef(surface, [](SDL_Surface *s) { if (s) SDL_DestroySurface(s); });
 }
 
@@ -76,7 +72,10 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     _defaultTexture = Texture::resolve(
         core::NamespacedId("noix", "builtin-default"),
         checkerboard, "",
-        core::ResourceMode::Dynamic);
+        core::ResourceMode::Dynamic,
+        std::nullopt,
+        SDL_GPU_FILTER_NEAREST,
+        SDL_GPU_FILTER_NEAREST);
     if (!_defaultTexture.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin texture");

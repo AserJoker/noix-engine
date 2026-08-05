@@ -34,16 +34,6 @@ Image::Handle Image::resolve(const core::NamespacedId &id,
                                            SDL_GetError());
             return {};
         }
-        if (surface->format != SDL_PIXELFORMAT_ABGR8888) {
-            SDL_Surface *converted =
-                SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ABGR8888);
-            SDL_DestroySurface(surface);
-            if (!converted) {
-                core::Logger::instance().error("Image: Failed to convert to ABGR8888");
-                return {};
-            }
-            surface = converted;
-        }
         surfaceRef = SurfaceRef(surface, SurfaceDeleter{});
     }
     // Static: surfaceRef stays empty, decoded on demand
@@ -65,13 +55,6 @@ SurfaceRef Image::decodeSurface() const {
         core::Logger::instance().error("Image: Failed to decode from disk: {}",
                                        filePath().string());
         return nullptr;
-    }
-    if (raw->format != SDL_PIXELFORMAT_ABGR8888) {
-        SDL_Surface *converted =
-            SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ABGR8888);
-        SDL_DestroySurface(raw);
-        if (!converted) return nullptr;
-        return SurfaceRef(converted, SurfaceDeleter{});
     }
     return SurfaceRef(raw, SurfaceDeleter{});
 }

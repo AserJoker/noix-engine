@@ -37,6 +37,12 @@ protected:
     Resource(NamespacedId id, std::filesystem::path filePath, ResourceMode mode)
         : _id(std::move(id)), _filePath(std::move(filePath)), _mode(mode) {}
 
+    Resource(Resource &&) = default;
+    Resource &operator=(Resource &&) = default;
+
+    Resource(const Resource &) = delete;
+    Resource &operator=(const Resource &) = delete;
+
     /// Read file content from disk. Used by Static mode to re-read on access.
     std::vector<uint8_t> readFileContent() const;
 
