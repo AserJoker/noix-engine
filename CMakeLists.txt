@@ -87,12 +87,11 @@ add_executable(noix-engine
     src/script/ScriptEngine.cpp
     src/video/Texture.cpp
     src/video/Image.cpp
-    src/video/PipelineDef.cpp
+    src/video/Shader.cpp
+    src/video/Pipeline.cpp
     src/video/NxmdData.cpp
     src/video/GeometryDef.cpp
     src/video/MaterialDef.cpp
-    src/video/PipelineCache.cpp
-
     src/video/MeshCache.cpp
     src/video/MaterialCache.cpp
     src/video/Renderer.cpp
@@ -121,7 +120,7 @@ set_target_properties(noix-engine PROPERTIES
 
 # ---- Shader compilation ----
 # Uses glslangValidator from system PATH or VULKAN_SDK to compile GLSL to SPIR-V.
-# .spv files are deployed to dist/assets/ for runtime loading via AssetManager.
+# Compiled SPIR-V is embedded into the binary via BuiltinShaders.h (no runtime disk access).
 find_program(GLSLANG_VALIDATOR glslangValidator
     HINTS "$ENV{VULKAN_SDK}/bin"
     DOC "Path to glslangValidator executable"
@@ -134,9 +133,8 @@ if(NOT GLSLANG_VALIDATOR)
 else()
     message(STATUS "Found glslangValidator: ${GLSLANG_VALIDATOR}")
 
-    set(SHADER_SRC_DIR ${CMAKE_SOURCE_DIR}/assets/noix/shaders)
+    set(SHADER_SRC_DIR ${CMAKE_SOURCE_DIR}/shaders)
     set(SHADER_BUILD_DIR ${CMAKE_BINARY_DIR}/shaders)
-    set(SHADER_DIST_DIR ${CMAKE_SOURCE_DIR}/dist/assets/noix/shaders)
 
     if(EXISTS "${SHADER_SRC_DIR}")
         file(GLOB_RECURSE SHADER_SOURCES LIST_DIRECTORIES false
@@ -162,15 +160,19 @@ else()
 
         add_custom_target(compile_shaders ALL DEPENDS ${SHADER_OUTPUTS})
 
-        foreach(SPV ${SHADER_OUTPUTS})
-            file(RELATIVE_PATH REL_PATH "${SHADER_BUILD_DIR}" ${SPV})
-            set(DST "${SHADER_DIST_DIR}/${REL_PATH}")
-            add_custom_command(
-                TARGET noix-engine POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SPV}" "${DST}"
-                COMMENT "Deploying shader: ${REL_PATH}"
-            )
-        endforeach()
+        # Generate embedded SPIR-V header for builtin shaders
+        set(EMBED_HEADER ${CMAKE_SOURCE_DIR}/src/video/BuiltinShaders.h)
+        add_custom_command(
+            OUTPUT ${EMBED_HEADER}
+            COMMAND ${CMAKE_COMMAND}
+                -DOUTPUT=${EMBED_HEADER}
+                -DSPIRV_DIR=${SHADER_BUILD_DIR}
+                -P ${CMAKE_SOURCE_DIR}/cmake/embed_spirv.cmake
+            DEPENDS ${SHADER_OUTPUTS}
+            COMMENT "Generating embedded SPIR-V header"
+        )
+        add_custom_target(embed_shaders DEPENDS ${EMBED_HEADER})
+        add_dependencies(noix-engine embed_shaders)
     endif()
 endif()
 

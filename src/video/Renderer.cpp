@@ -1,8 +1,11 @@
 #include "video/Renderer.h"
+#include "video/BuiltinShaders.h"
 #include "core/Logger.h"
 #include "core/NamespacedId.h"
 #include "runtime/AssetManager.h"
 #include "video/Image.h"
+#include "video/Pipeline.h"
+#include "video/Shader.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -20,6 +23,53 @@ static SurfaceRef createBuiltinCheckerboard() {
     pixels[2] = 0xFFA0A0A0; // gray
     pixels[3] = 0xFFFFFFFF; // white
     return SurfaceRef(surface, [](SDL_Surface *s) { if (s) SDL_DestroySurface(s); });
+}
+
+// --- Builtin pipeline JSON definition ---
+
+static const char kBuiltinPipelineTextured[] = R"({
+  "vertex_shader": "noix:builtin-textured-vert",
+  "fragment_shader": "noix:builtin-textured-frag",
+  "primitive_type": "triangle_list",
+  "vertex_input": {
+    "buffers": [
+      {"slot": 0, "stride": 16, "input_rate": "vertex"}
+    ],
+    "attributes": [
+      {"location": 0, "buffer_slot": 0, "format": "float2", "offset": 0},
+      {"location": 1, "buffer_slot": 0, "format": "float2", "offset": 8}
+    ]
+  },
+  "color_targets": [
+    {
+      "format": "swapchain",
+      "blend": {
+        "src_color": "src_alpha",
+        "dst_color": "one_minus_src_alpha",
+        "color_op": "add",
+        "src_alpha": "one",
+        "dst_alpha": "one_minus_src_alpha",
+        "alpha_op": "add",
+        "color_write_mask": 15,
+        "enable_blend": true
+      }
+    }
+  ]
+})";
+
+/// Register embedded SPIR-V data for builtin shaders into AssetManager.
+static void registerBuiltinShaders(runtime::AssetManager &assetMgr) {
+    assetMgr.addBuiltinData(
+        core::NamespacedId("noix", "builtin-textured-vert"),
+        std::vector<uint8_t>(
+            kShader_textured_texture_vert_spv,
+            kShader_textured_texture_vert_spv + kShader_textured_texture_vert_spv_size));
+
+    assetMgr.addBuiltinData(
+        core::NamespacedId("noix", "builtin-textured-frag"),
+        std::vector<uint8_t>(
+            kShader_textured_texture_frag_spv,
+            kShader_textured_texture_frag_spv + kShader_textured_texture_frag_spv_size));
 }
 
 // ---------------------------------------------------------------------------
@@ -43,17 +93,24 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         return false;
     }
 
-    SDL_GPUTextureFormat swapchainFmt =
+    SDL_GPUTextureFormat swapchainFormat =
         SDL_GetGPUSwapchainTextureFormat(_device, _window);
 
     // Register builtin IDs
-    _pipelineCache.addBuiltin(core::NamespacedId("noix", "pipelines/textured.json"));
     _meshCache.addBuiltin(core::NamespacedId("noix", "geometry/quad.nxmd"));
 
-    // Load builtin pipeline
-    _defaultPipeline = _pipelineCache.create(
-        core::NamespacedId("noix", "pipelines/textured.json"),
-        _device, assetMgr, swapchainFmt);
+    // Register embedded builtin shader SPIR-V data
+    registerBuiltinShaders(assetMgr);
+
+    // Build builtin pipeline directly from embedded JSON
+    core::NamespacedId pipelineId("noix", "builtin-textured-pipeline");
+    auto jsonBegin = reinterpret_cast<const uint8_t *>(kBuiltinPipelineTextured);
+    auto jsonEnd = jsonBegin + sizeof(kBuiltinPipelineTextured) - 1;
+    _defaultPipeline = Pipeline::resolve(
+        pipelineId,
+        std::vector<uint8_t>(jsonBegin, jsonEnd),
+        "", core::ResourceMode::Dynamic, swapchainFormat);
+    assetMgr.addBuiltin(pipelineId);
     if (!_defaultPipeline.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin pipeline");
@@ -114,11 +171,12 @@ void Renderer::shutdown() {
     if (!_initialized && !_device) return;
 
     // Release GPU resources BEFORE destroying the device.
-    // Texture/Image destructors call Application::renderer().gpuDevice().
+    // Destructors call Application::renderer().gpuDevice().
     _materialCache = MaterialCache();
     _meshCache = MeshCache();
-    _pipelineCache = PipelineCache();
+    Pipeline::slotMap().clear();
     Texture::slotMap().clear();
+    Shader::slotMap().clear();
     Image::slotMap().clear();
 
     if (_window) {
@@ -133,15 +191,10 @@ void Renderer::shutdown() {
 // ---------------------------------------------------------------------------
 
 void Renderer::updateResources(
-    const std::vector<core::NamespacedId> &pipelineIds,
     const std::vector<core::NamespacedId> &meshIds,
     const std::vector<core::NamespacedId> &materialIds) {
     if (!_initialized) return;
 
-    SDL_GPUTextureFormat swapchainFmt =
-        SDL_GetGPUSwapchainTextureFormat(_device, _window);
-
-    _pipelineCache.update(pipelineIds, _device, *_assetMgr, swapchainFmt);
     _meshCache.update(meshIds, _device, *_assetMgr);
     _materialCache.update(materialIds, *_assetMgr);
 }
@@ -177,8 +230,10 @@ void Renderer::render() {
     SDL_GPURenderPass *pass =
         SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, nullptr);
 
-    SDL_BindGPUGraphicsPipeline(pass,
-                                _pipelineCache.get(_defaultPipeline));
+    Pipeline *pipeline = _defaultPipeline.get();
+    if (pipeline && pipeline->gpuPipeline()) {
+        SDL_BindGPUGraphicsPipeline(pass, pipeline->gpuPipeline());
+    }
 
     SDL_GPUViewport viewport{};
     viewport.x = 0.0f;

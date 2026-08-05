@@ -100,6 +100,15 @@ public:
     /// Check if a resource is a builtin.
     bool isBuiltin(const core::NamespacedId &id) const;
 
+    // --- Builtin data ---
+
+    /// Register in-memory data for a builtin resource.
+    /// Shader::loadFromAsset uses this instead of reading from disk.
+    void addBuiltinData(const core::NamespacedId &id, std::vector<uint8_t> data);
+
+    /// Get builtin data for a resource. Returns nullptr if not registered.
+    const std::vector<uint8_t> *getBuiltinData(const core::NamespacedId &id) const;
+
     // --- File I/O ---
 
     /// Write data to a NamespacedId path (always in defaultPath).
@@ -115,6 +124,7 @@ private:
 
     std::unordered_map<core::NamespacedId, std::unique_ptr<core::BaseHandle>> _activeResources;
     std::unordered_set<core::NamespacedId> _builtins;
+    std::unordered_map<core::NamespacedId, std::vector<uint8_t>> _builtinData;
 };
 
 } // namespace noix::runtime

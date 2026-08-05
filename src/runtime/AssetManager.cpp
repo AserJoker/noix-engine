@@ -103,6 +103,16 @@ bool AssetManager::isBuiltin(const core::NamespacedId &id) const {
     return _builtins.count(id) > 0;
 }
 
+void AssetManager::addBuiltinData(const core::NamespacedId &id, std::vector<uint8_t> data) {
+    _builtinData[id] = std::move(data);
+    _builtins.insert(id);
+}
+
+const std::vector<uint8_t> *AssetManager::getBuiltinData(const core::NamespacedId &id) const {
+    auto it = _builtinData.find(id);
+    return it != _builtinData.end() ? &it->second : nullptr;
+}
+
 // --- File I/O ---
 
 bool AssetManager::write(const core::NamespacedId &id, const std::vector<uint8_t> &data) {
