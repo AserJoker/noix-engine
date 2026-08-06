@@ -3,6 +3,7 @@
 #include "core/Logger.h"
 #include "core/NamespacedId.h"
 #include "runtime/AssetManager.h"
+#include "video/Drawable.h"
 #include "video/Image.h"
 #include "video/Mesh.h"
 #include "video/Pipeline.h"
@@ -147,6 +148,7 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     _defaultTexture = *textureHandle;
 
     // Load builtin mesh (unit quad)
+    Mesh::Handle builtinMesh;
     auto *meshHandle = assetMgr.create<Mesh>(
         core::NamespacedId("noix", "geometry/quad.nxmd"));
     if (!meshHandle) {
@@ -155,18 +157,24 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-    _defaultMesh = *meshHandle;
+    builtinMesh = *meshHandle;
 
     // Load default material
+    Material::Handle builtinMaterial;
     auto *matHandle = assetMgr.load<Material>(
         core::NamespacedId("noix", "materials/brick.json"));
     if (matHandle) {
-        _defaultMaterial = *matHandle;
+        builtinMaterial = *matHandle;
     }
 
-    // Set up transform matrices: identity view + identity projection (NDC geometry)
+    // Create default Drawable for validation
+    if (builtinMesh.isValid() && builtinMaterial.isValid()) {
+        addDrawable(Drawable(std::move(builtinMesh), std::move(builtinMaterial)));
+    }
+
+    // Set up transform matrices: identity view + orthographic projection
     _view = glm::mat4(1.0f);
-    _proj = glm::mat4(1.0f);
+    _proj = glm::mat4(1.0f); // Updated per-frame in render()
 
     _initialized = true;
     core::Logger::instance().info("Renderer: GPU device initialized (driver: {})",
@@ -178,6 +186,8 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
 
 void Renderer::shutdown() {
     if (!_initialized && !_device) return;
+
+    _drawables.clear();
 
     // Resources are released by AssetManager destruction (which happens before
     // Renderer destruction in Application::cleanup).
@@ -193,8 +203,26 @@ void Renderer::shutdown() {
 
 // ---------------------------------------------------------------------------
 
+void Renderer::addDrawable(Drawable drawable) {
+    _drawables.push_back(std::move(drawable));
+}
+
+void Renderer::clearDrawables() {
+    _drawables.clear();
+}
+
+// ---------------------------------------------------------------------------
+
 void Renderer::render() {
     if (!_initialized) return;
+
+    // TEST: rotate first drawable over time
+    if (!_drawables.empty()) {
+        float seconds = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+        float angle = seconds * 0.5f; // 0.5 rad/s
+        _drawables[0].transform() = glm::rotate(glm::mat4(1.0f), angle,
+                                                  glm::vec3(0.0f, 0.0f, 1.0f));
+    }
 
     SDL_GPUCommandBuffer *cmdBuf = SDL_AcquireGPUCommandBuffer(_device);
     if (!cmdBuf) {
@@ -213,6 +241,10 @@ void Renderer::render() {
     int w = 0, h = 0;
     SDL_GetWindowSize(_window, &w, &h);
 
+    // Update orthographic projection to correct aspect ratio
+    float aspect = static_cast<float>(w) / static_cast<float>(h);
+    _proj = glm::ortho(-aspect, aspect, -1.0f, 1.0f);
+
     SDL_GPUColorTargetInfo colorTarget{};
     colorTarget.texture = swapchain;
     colorTarget.clear_color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -222,10 +254,14 @@ void Renderer::render() {
     SDL_GPURenderPass *pass =
         SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, nullptr);
 
+    // Bind builtin pipeline
     Pipeline *pipeline = _defaultPipeline.get();
-    if (pipeline && pipeline->gpuPipeline()) {
-        SDL_BindGPUGraphicsPipeline(pass, pipeline->gpuPipeline());
+    if (!pipeline || !pipeline->gpuPipeline()) {
+        SDL_EndGPURenderPass(pass);
+        SDL_SubmitGPUCommandBuffer(cmdBuf);
+        return;
     }
+    SDL_BindGPUGraphicsPipeline(pass, pipeline->gpuPipeline());
 
     SDL_GPUViewport viewport{};
     viewport.x = 0.0f;
@@ -236,15 +272,21 @@ void Renderer::render() {
     viewport.max_depth = 1.0f;
     SDL_SetGPUViewport(pass, &viewport);
 
-    // Push transform uniforms (std140 aligned)
-    struct { glm::mat4 view; glm::mat4 proj; } transformData;
-    transformData.view = _view;
-    transformData.proj = _proj;
-    SDL_PushGPUVertexUniformData(cmdBuf, 0, &transformData,
-                                 sizeof(transformData));
+    // Render each Drawable
+    for (auto &drawable : _drawables) {
+        Mesh *mesh = drawable.mesh().get();
+        Material *material = drawable.material().get();
+        if (!mesh || !material) continue;
 
-    Mesh *mesh = _defaultMesh.get();
-    if (mesh) {
+        // Push per-object vertex uniforms: { model, view, proj }
+        struct { glm::mat4 model; glm::mat4 view; glm::mat4 proj; } transformData;
+        transformData.model = drawable.transform();
+        transformData.view = _view;
+        transformData.proj = _proj;
+        SDL_PushGPUVertexUniformData(cmdBuf, 0, &transformData,
+                                     sizeof(transformData));
+
+        // Bind mesh vertex/index buffers
         SDL_GPUBufferBinding vertexBinding{};
         vertexBinding.buffer = mesh->vertexBuffer();
         vertexBinding.offset = 0;
@@ -256,18 +298,22 @@ void Renderer::render() {
             indexBinding.offset = 0;
             SDL_BindGPUIndexBuffer(pass, &indexBinding, mesh->indexType());
         }
-    }
 
-    // Bind texture sampler (builtin checkerboard)
-    Texture *tex = _defaultTexture.get();
-    if (tex && tex->gpuTexture() && tex->gpuSampler()) {
-        SDL_GPUTextureSamplerBinding bind{};
-        bind.texture = tex->gpuTexture();
-        bind.sampler = tex->gpuSampler();
-        SDL_BindGPUFragmentSamplers(pass, 0, &bind, 1);
-    }
+        // Bind texture: use material's texture if available, else fallback checkerboard
+        Texture *tex = _defaultTexture.get();
+        auto payload = material->data();
+        if (payload && !payload->textures.empty()) {
+            // TODO: load texture from TextureBinding.asset via AssetManager
+            // For now, still use default checkerboard
+        }
+        if (tex && tex->gpuTexture() && tex->gpuSampler()) {
+            SDL_GPUTextureSamplerBinding bind{};
+            bind.texture = tex->gpuTexture();
+            bind.sampler = tex->gpuSampler();
+            SDL_BindGPUFragmentSamplers(pass, 0, &bind, 1);
+        }
 
-    if (mesh) {
+        // Draw
         if (mesh->indexBuffer()) {
             SDL_DrawGPUIndexedPrimitives(pass, mesh->indexCount(), 1, 0, 0, 0);
         } else {

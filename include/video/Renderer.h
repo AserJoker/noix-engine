@@ -2,16 +2,17 @@
 
 /*
  * Renderer — SDL3 GPU rendering backend.
- * Manages GPU resources via Pipeline, Texture, Mesh, Material.
+ * Iterates Drawable list, binds resources, issues draw calls.
  */
 
-#include "video/Material.h"
-#include "video/Mesh.h"
+#include "video/Drawable.h"
 #include "video/Pipeline.h"
 #include "video/Texture.h"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
+
+#include <vector>
 
 namespace noix::runtime { class AssetManager; }
 
@@ -36,6 +37,12 @@ public:
 
   SDL_GPUDevice *gpuDevice() const { return _device; }
 
+  /// Add a Drawable to the render list.
+  void addDrawable(Drawable drawable);
+
+  /// Remove all Drawables.
+  void clearDrawables();
+
 private:
   SDL_GPUDevice *_device = nullptr;
   SDL_Window *_window = nullptr;
@@ -46,10 +53,9 @@ private:
   glm::mat4 _proj{1.0f};
 
   Pipeline::Handle _defaultPipeline;
-  Mesh::Handle _defaultMesh;
-  Material::Handle _defaultMaterial;
+  Texture::Handle  _defaultTexture;
 
-  Texture::Handle _defaultTexture;
+  std::vector<Drawable> _drawables;
 };
 
 } // namespace noix::video
