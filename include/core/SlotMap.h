@@ -5,10 +5,14 @@
  * Uses SlotId (24-bit index + 8-bit generation) for access.
  * Does NOT depend on Handle; pure data structure.
  * T must be MoveConstructible. T does NOT need to be default-constructible.
+ *
+ * compact() — GC: shrinks the vector by removing trailing free slots.
+ * Only safe when no live Handle references trailing indices.
  */
 
 #include "core/SlotId.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -64,10 +68,49 @@ public:
         return &*slot.value;
     }
 
+    /// Number of occupied slots.
+    size_t size() const {
+        return _slots.size() - _freeList.size();
+    }
+
+    /// Total capacity (occupied + free).
+    size_t capacity() const {
+        return _slots.size();
+    }
+
     /// Remove all entries. Destructors of stored objects are called.
     void clear() {
         _slots.clear();
         _freeList.clear();
+    }
+
+    /// Shrink the vector by removing trailing free slots.
+    /// Scans from the end, pops consecutive unoccupied slots,
+    /// removes their indices from the free list, then shrinks the vector.
+    /// Returns the number of slots removed.
+    size_t compact() {
+        if (_slots.empty()) return 0;
+
+        size_t removed = 0;
+        while (!_slots.empty()) {
+            auto &slot = _slots.back();
+            if (slot.occupied) break;
+            uint32_t idx = static_cast<uint32_t>(_slots.size() - 1);
+
+            // Remove this index from the free list
+            auto it = std::find(_freeList.begin(), _freeList.end(), idx);
+            if (it != _freeList.end()) {
+                _freeList.erase(it);
+            }
+
+            _slots.pop_back();
+            ++removed;
+        }
+
+        // Shrink vectors to fit
+        _slots.shrink_to_fit();
+        _freeList.shrink_to_fit();
+        return removed;
     }
 
 private:

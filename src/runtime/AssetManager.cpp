@@ -13,6 +13,10 @@ namespace noix::runtime {
 AssetManager::AssetManager(std::filesystem::path basePath)
     : _defaultPath(std::move(basePath)) {}
 
+AssetManager::~AssetManager() {
+    shutdown();
+}
+
 void AssetManager::addPack(const std::filesystem::path& packPath) {
     auto canonical = std::filesystem::weakly_canonical(packPath);
     _packRoots.push_back(canonical);
@@ -91,6 +95,15 @@ void AssetManager::unloadAll() {
             it = _activeResources.erase(it);
         }
     }
+}
+
+void AssetManager::shutdown() {
+    for (auto it = _activeResources.begin(); it != _activeResources.end(); ) {
+        it->second->unload();
+        it = _activeResources.erase(it);
+    }
+    _builtins.clear();
+    _builtinData.clear();
 }
 
 // --- Builtin protection ---

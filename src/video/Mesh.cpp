@@ -260,9 +260,9 @@ Mesh::Handle Mesh::resolve(const core::NamespacedId &id,
     return Handle(slotMap().insert(std::move(mesh)));
 }
 
-// ---- createBuiltinQuad ----
+// ---- create: builtin unit quad ----
 
-Mesh::Handle Mesh::createBuiltinQuad(const core::NamespacedId &id) {
+Mesh::Handle Mesh::create(const core::NamespacedId &id) {
     auto *device = runtime::Application::instance()
                        .renderer().gpuDevice();
     if (!device) return {};

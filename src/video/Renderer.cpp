@@ -60,17 +60,21 @@ static const char kBuiltinPipelineTextured[] = R"({
 
 /// Register embedded SPIR-V data for builtin shaders into AssetManager.
 static void registerBuiltinShaders(runtime::AssetManager &assetMgr) {
-    assetMgr.addBuiltinData(
+    auto vertSpirv = std::make_shared<std::vector<uint8_t>>(
+        kShader_textured_texture_vert_spv,
+        kShader_textured_texture_vert_spv + kShader_textured_texture_vert_spv_size);
+    assetMgr.create<Shader>(
         core::NamespacedId("noix", "builtin-textured-vert"),
-        std::vector<uint8_t>(
-            kShader_textured_texture_vert_spv,
-            kShader_textured_texture_vert_spv + kShader_textured_texture_vert_spv_size));
+        vertSpirv);
+    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-textured-vert"));
 
-    assetMgr.addBuiltinData(
+    auto fragSpirv = std::make_shared<std::vector<uint8_t>>(
+        kShader_textured_texture_frag_spv,
+        kShader_textured_texture_frag_spv + kShader_textured_texture_frag_spv_size);
+    assetMgr.create<Shader>(
         core::NamespacedId("noix", "builtin-textured-frag"),
-        std::vector<uint8_t>(
-            kShader_textured_texture_frag_spv,
-            kShader_textured_texture_frag_spv + kShader_textured_texture_frag_spv_size));
+        fragSpirv);
+    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-textured-frag"));
 }
 
 // ---------------------------------------------------------------------------
@@ -107,17 +111,18 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     core::NamespacedId pipelineId("noix", "builtin-textured-pipeline");
     auto jsonBegin = reinterpret_cast<const uint8_t *>(kBuiltinPipelineTextured);
     auto jsonEnd = jsonBegin + sizeof(kBuiltinPipelineTextured) - 1;
-    _defaultPipeline = Pipeline::create(
+    auto *pipelineHandle = assetMgr.create<Pipeline>(
         pipelineId,
         std::vector<uint8_t>(jsonBegin, jsonEnd),
         swapchainFormat);
     assetMgr.addBuiltin(pipelineId);
-    if (!_defaultPipeline.isValid()) {
+    if (!pipelineHandle) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin pipeline");
         shutdown();
         return false;
     }
+    _defaultPipeline = *pipelineHandle;
 
     // Load builtin texture (2x2 checkerboard, code-generated)
     auto checkerboard = createBuiltinCheckerboard();
@@ -127,28 +132,30 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-    _defaultTexture = Texture::create(
+    auto *textureHandle = assetMgr.create<Texture>(
         core::NamespacedId("noix", "builtin-default"),
         checkerboard,
         std::nullopt,
         SDL_GPU_FILTER_NEAREST,
         SDL_GPU_FILTER_NEAREST);
-    if (!_defaultTexture.isValid()) {
+    if (!textureHandle) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin texture");
         shutdown();
         return false;
     }
+    _defaultTexture = *textureHandle;
 
     // Load builtin mesh (unit quad)
-    _defaultMesh = Mesh::createBuiltinQuad(
+    auto *meshHandle = assetMgr.create<Mesh>(
         core::NamespacedId("noix", "geometry/quad.nxmd"));
-    if (!_defaultMesh.isValid()) {
+    if (!meshHandle) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin mesh");
         shutdown();
         return false;
     }
+    _defaultMesh = *meshHandle;
 
     // Load default material
     auto *matHandle = assetMgr.load<Material>(
@@ -172,15 +179,8 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
 void Renderer::shutdown() {
     if (!_initialized && !_device) return;
 
-    // Release GPU resources BEFORE destroying the device.
-    // Destructors call Application::renderer().gpuDevice().
-    Material::slotMap().clear();
-    Mesh::slotMap().clear();
-    Nxmd::slotMap().clear();
-    Pipeline::slotMap().clear();
-    Texture::slotMap().clear();
-    Shader::slotMap().clear();
-    Image::slotMap().clear();
+    // Resources are released by AssetManager destruction (which happens before
+    // Renderer destruction in Application::cleanup).
 
     if (_window) {
         SDL_ReleaseWindowFromGPUDevice(_device, _window);

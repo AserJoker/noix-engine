@@ -38,7 +38,7 @@ public:
                           core::ResourceMode mode = core::ResourceMode::Dynamic);
 
     /// Create a builtin unit quad (2D positions + UVs) (always Dynamic).
-    static Handle createBuiltinQuad(const core::NamespacedId &id);
+    static Handle create(const core::NamespacedId &id);
 
     // --- Accessors ---
 

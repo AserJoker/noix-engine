@@ -13,6 +13,29 @@
 
 namespace noix::video {
 
+// ---- Helper: create temporary GPU shader from SPIR-V data ----
+
+static SDL_GPUShader *createGpuShader(SDL_GPUDevice *device,
+                                       const SpirvRef &spirv,
+                                       SDL_GPUShaderStage stage,
+                                       uint32_t numSamplers,
+                                       uint32_t numUniformBuffers) {
+    if (!spirv || spirv->empty()) return nullptr;
+    SDL_GPUShaderCreateInfo info{};
+    info.code = spirv->data();
+    info.code_size = spirv->size();
+    info.entrypoint = "main";
+    info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    info.stage = stage;
+    info.num_samplers = numSamplers;
+    info.num_uniform_buffers = numUniformBuffers;
+    return SDL_CreateGPUShader(device, &info);
+}
+
+static void releaseGpuShader(SDL_GPUDevice *device, SDL_GPUShader *shader) {
+    if (shader && device) SDL_ReleaseGPUShader(device, shader);
+}
+
 // =====================================================================
 // SDL enum ↔ string maps
 // =====================================================================
@@ -414,32 +437,64 @@ Pipeline::Handle Pipeline::create(const core::NamespacedId &id,
         multisample.enable_alpha_to_coverage = ms["enable_alpha_to_coverage"].asBool(false);
     }
 
-    // --- Load shaders ---
+    // --- Load shaders (CPU resources) and create temporary GPU shaders ---
 
     auto &assetMgr = runtime::Application::instance().assetManager();
-    std::map<core::NamespacedId, SDL_GPUShader *> shaderMap;
 
-    auto *vs = Shader::loadFromAsset(assetMgr, vertexShaderId,
-                                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-    if (!vs) return {};
-    shaderMap[vertexShaderId] = vs;
+    // Load vertex shader data
+    auto *vsHandle = assetMgr.find<Shader>(vertexShaderId);
+    if (!vsHandle) {
+        vsHandle = assetMgr.load<Shader>(vertexShaderId);
+    }
+    if (!vsHandle) {
+        core::Logger::instance().error(
+            "Pipeline: Failed to load vertex shader: {}", vertexShaderId.toString());
+        return {};
+    }
+    SpirvRef vsSpirv = vsHandle->get()->data();
+    if (!vsSpirv) return {};
 
+    SDL_GPUShader *vs = createGpuShader(device, vsSpirv,
+                                         SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+    if (!vs) {
+        core::Logger::instance().error(
+            "Pipeline: Failed to create vertex GPU shader");
+        return {};
+    }
+
+    SDL_GPUShader *fs = nullptr;
     if (fragmentShaderId.has_value()) {
-        auto *fs = Shader::loadFromAsset(assetMgr, *fragmentShaderId,
-                                          SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-        if (!fs) {
-            Shader::slotMap().clear();
+        auto *fsHandle = assetMgr.find<Shader>(*fragmentShaderId);
+        if (!fsHandle) {
+            fsHandle = assetMgr.load<Shader>(*fragmentShaderId);
+        }
+        if (!fsHandle) {
+            core::Logger::instance().error(
+                "Pipeline: Failed to load fragment shader: {}",
+                fragmentShaderId->toString());
+            releaseGpuShader(device, vs);
             return {};
         }
-        shaderMap[*fragmentShaderId] = fs;
+        SpirvRef fsSpirv = fsHandle->get()->data();
+        if (!fsSpirv) {
+            releaseGpuShader(device, vs);
+            return {};
+        }
+        fs = createGpuShader(device, fsSpirv,
+                             SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+        if (!fs) {
+            core::Logger::instance().error(
+                "Pipeline: Failed to create fragment GPU shader");
+            releaseGpuShader(device, vs);
+            return {};
+        }
     }
 
     // --- Create GPU pipeline ---
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = vs;
-    info.fragment_shader = fragmentShaderId.has_value()
-        ? shaderMap[*fragmentShaderId] : nullptr;
+    info.fragment_shader = fs;
     info.primitive_type = primitiveType;
 
     info.vertex_input_state.vertex_buffer_descriptions = vertexBuffers.data();
@@ -462,8 +517,9 @@ Pipeline::Handle Pipeline::create(const core::NamespacedId &id,
 
     SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
 
-    // Release shaders — pipeline owns a copy internally
-    Shader::slotMap().clear();
+    // Release temporary GPU shaders — pipeline owns a copy internally
+    releaseGpuShader(device, fs);
+    releaseGpuShader(device, vs);
 
     if (!pipeline) {
         core::Logger::instance().error(

@@ -15,7 +15,7 @@ namespace noix::runtime {
 class AssetManager {
 public:
     explicit AssetManager(std::filesystem::path basePath);
-    ~AssetManager() = default;
+    ~AssetManager();
 
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
@@ -51,7 +51,7 @@ public:
 
     // --- Generic load / unload ---
 
-    /// Load a resource by type. Returns nullptr on failure.
+    /// Load a resource by type from file. Returns nullptr on failure.
     /// If already loaded, returns the existing Handle.
     template<typename T>
     core::Handle<T> *load(const core::NamespacedId &id) {
@@ -64,6 +64,24 @@ public:
         if (!path) return nullptr;
 
         auto handle = T::resolve(id, *path);
+        if (!handle.isValid()) return nullptr;
+
+        auto ptr = std::make_unique<core::Handle<T>>(handle);
+        auto *raw = ptr.get();
+        _activeResources[id] = std::move(ptr);
+        return raw;
+    }
+
+    /// Create a builtin resource by type with direct data. Returns nullptr on failure.
+    /// If already created, returns the existing Handle.
+    template<typename T, typename... Args>
+    core::Handle<T> *create(const core::NamespacedId &id, Args&&... args) {
+        auto it = _activeResources.find(id);
+        if (it != _activeResources.end()) {
+            return static_cast<core::Handle<T>*>(it->second.get());
+        }
+
+        auto handle = T::create(id, std::forward<Args>(args)...);
         if (!handle.isValid()) return nullptr;
 
         auto ptr = std::make_unique<core::Handle<T>>(handle);
@@ -89,6 +107,9 @@ public:
 
     /// Unload all non-builtin resources.
     void unloadAll();
+
+    /// Unload ALL resources including builtins. Called before GPU device destruction.
+    void shutdown();
 
     // --- Builtin protection ---
 
