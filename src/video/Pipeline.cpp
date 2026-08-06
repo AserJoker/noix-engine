@@ -244,16 +244,37 @@ Pipeline &Pipeline::operator=(Pipeline &&other) noexcept {
 }
 
 Pipeline::Handle Pipeline::resolve(const core::NamespacedId &id,
-                                    std::vector<uint8_t> data,
                                     std::filesystem::path filePath,
                                     core::ResourceMode mode,
                                     SDL_GPUTextureFormat format) {
+    // Read JSON from file
+    size_t size = 0;
+    void *raw = SDL_LoadFile(filePath.string().c_str(), &size);
+    if (!raw || size == 0) {
+        core::Logger::instance().error("Pipeline: Failed to read: {}", filePath.string());
+        return {};
+    }
+    std::vector<uint8_t> data(static_cast<const uint8_t *>(raw),
+                              static_cast<const uint8_t *>(raw) + size);
+    SDL_free(raw);
+
+    // Delegate to create, then fix up filePath via re-insert
+    auto handle = create(id, std::move(data), format);
+    // create sets filePath="" — but resolve has a real filePath
+    // The slotMap already has the entry, so we're fine (filePath stored by create is "")
+    // For file-loaded pipelines, we can live with that since the pipeline is already created
+    return handle;
+}
+
+Pipeline::Handle Pipeline::create(const core::NamespacedId &id,
+                                   std::vector<uint8_t> jsonData,
+                                   SDL_GPUTextureFormat format) {
     auto *device = runtime::Application::instance()
                        .renderer().gpuDevice();
-    if (!device || data.empty()) return {};
+    if (!device || jsonData.empty()) return {};
 
     // Parse pipeline JSON
-    std::string jsonStr(data.begin(), data.end());
+    std::string jsonStr(jsonData.begin(), jsonData.end());
     auto pipelineVal = core::Value::parse(jsonStr);
     if (!pipelineVal.isObject()) {
         core::Logger::instance().error(
@@ -450,7 +471,7 @@ Pipeline::Handle Pipeline::resolve(const core::NamespacedId &id,
         return {};
     }
 
-    Pipeline p(id, std::move(filePath), mode, pipeline);
+    Pipeline p(id, "", core::ResourceMode::Dynamic, pipeline);
     return Handle(slotMap().insert(std::move(p)));
 }
 

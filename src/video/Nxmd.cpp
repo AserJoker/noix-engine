@@ -1,4 +1,4 @@
-#include "video/NxmdData.h"
+#include "video/Nxmd.h"
 #include "core/Logger.h"
 
 #include <SDL3/SDL.h>
@@ -17,41 +17,32 @@ struct FileHeader {
 };
 
 struct SectionDescriptor {
-    uint32_t type;      // SectionType
-    uint32_t descSize;  // total size of this descriptor (including type + descSize)
+    uint32_t type;
+    uint32_t descSize;
     uint64_t dataOffset;
     uint64_t dataSize;
 };
 #pragma pack(pop)
 
-std::optional<NxmdData> NxmdData::load(const std::string &path) {
-    SDL_IOStream *io = SDL_IOFromFile(path.c_str(), "rb");
-    if (!io) {
-        core::Logger::instance().error("NxmdData: Cannot open file: {}", path);
-        return std::nullopt;
-    }
+// ---- Parsing from SDL_IOStream ----
 
-    // Read header
+static std::optional<NxmdPayload> parseFromIO(SDL_IOStream *io) {
     FileHeader header{};
     if (SDL_ReadIO(io, &header, sizeof(header)) != sizeof(header)) {
-        core::Logger::instance().error("NxmdData: Failed to read header");
-        SDL_CloseIO(io);
+        core::Logger::instance().error("Nxmd: Failed to read header");
         return std::nullopt;
     }
 
     if (header.magic != NXMD_MAGIC) {
-        core::Logger::instance().error("NxmdData: Invalid magic: 0x{:08X}", header.magic);
-        SDL_CloseIO(io);
+        core::Logger::instance().error("Nxmd: Invalid magic: 0x{:08X}", header.magic);
         return std::nullopt;
     }
 
     if (header.version > NXMD_VERSION) {
-        core::Logger::instance().error("NxmdData: Unsupported version: {}", header.version);
-        SDL_CloseIO(io);
+        core::Logger::instance().error("Nxmd: Unsupported version: {}", header.version);
         return std::nullopt;
     }
 
-    // Read section descriptors + their type-specific fields
     struct SectionInfo {
         SectionDescriptor desc;
         uint32_t vertexCount = 0;
@@ -69,12 +60,10 @@ std::optional<NxmdData> NxmdData::load(const std::string &path) {
         auto &sec = sections[i];
         if (SDL_ReadIO(io, &sec.desc, sizeof(SectionDescriptor)) !=
             sizeof(SectionDescriptor)) {
-            core::Logger::instance().error("NxmdData: Failed to read section descriptor {}", i);
-            SDL_CloseIO(io);
+            core::Logger::instance().error("Nxmd: Failed to read section descriptor {}", i);
             return std::nullopt;
         }
 
-        // Read type-specific fields based on section type
         switch (sec.desc.type) {
         case SECTION_VERTEX_BUFFER:
             SDL_ReadIO(io, &sec.vertexCount, 4);
@@ -97,63 +86,61 @@ std::optional<NxmdData> NxmdData::load(const std::string &path) {
             SDL_ReadIO(io, &sec.duration, 4);
             break;
         default:
-            // Skip unknown type-specific fields
             SDL_SeekIO(io, sec.desc.dataOffset, SDL_IO_SEEK_SET);
             break;
         }
     }
 
-    NxmdData data;
+    NxmdPayload payload;
 
-    // Process each section — read raw data
     for (uint32_t i = 0; i < header.sectionCount; ++i) {
         const auto &sec = sections[i];
         SDL_SeekIO(io, sec.desc.dataOffset, SDL_IO_SEEK_SET);
 
         switch (sec.desc.type) {
         case SECTION_VERTEX_BUFFER: {
-            data._vertexCount = sec.vertexCount;
-            data._attributes = sec.attributes;
+            payload.vertexCount = sec.vertexCount;
+            payload.attributes = sec.attributes;
 
             uint32_t stride = 0;
             if (!sec.attributes.empty()) {
-                static const uint32_t formatSizes[] = {8,12,16,2,4,2,4,4,8,4,8};
+                static const uint32_t formatSizes[] = {8, 12, 16, 2, 4, 2, 4, 4, 8, 4, 8};
                 const auto &last = sec.attributes.back();
                 stride = last.offset + formatSizes[last.format];
             }
             size_t vDataSize = static_cast<size_t>(sec.vertexCount) * stride;
-            data._vertexData.resize(vDataSize);
-            SDL_ReadIO(io, data._vertexData.data(), vDataSize);
+            payload.vertexData.resize(vDataSize);
+            SDL_ReadIO(io, payload.vertexData.data(), vDataSize);
             break;
         }
 
         case SECTION_INDEX_BUFFER: {
-            data._indexCount = sec.indexCount;
-            data._indexType = sec.indexType;
+            payload.indexCount = sec.indexCount;
+            payload.indexType = sec.indexType;
             size_t iDataSize = static_cast<size_t>(sec.indexCount) *
                                (sec.indexType == INDEX_UINT16 ? 2 : 4);
-            data._indexData.resize(iDataSize);
-            SDL_ReadIO(io, data._indexData.data(), iDataSize);
+            payload.indexData.resize(iDataSize);
+            SDL_ReadIO(io, payload.indexData.data(), iDataSize);
             break;
         }
 
         case SECTION_SKELETON: {
-            data._bones.emplace();
-            data._bones->resize(sec.boneCount);
+            payload.bones.emplace();
+            payload.bones->resize(sec.boneCount);
             for (uint32_t j = 0; j < sec.boneCount; ++j) {
-                SDL_ReadIO(io, &(*data._bones)[j], sizeof(BoneDesc));
+                SDL_ReadIO(io, &(*payload.bones)[j], sizeof(BoneDesc));
             }
             break;
         }
 
         case SECTION_ANIMATION_CLIP: {
-            data._animationClips.resize(sec.boneCount);
+            payload.animationClips.resize(sec.boneCount);
             for (uint32_t b = 0; b < sec.boneCount; ++b) {
                 uint32_t kfCount = 0;
                 SDL_ReadIO(io, &kfCount, 4);
-                data._animationClips[b].resize(kfCount);
+                payload.animationClips[b].resize(kfCount);
                 for (uint32_t k = 0; k < kfCount; ++k) {
-                    SDL_ReadIO(io, &data._animationClips[b][k], sizeof(KeyframeDesc));
+                    SDL_ReadIO(io, &payload.animationClips[b][k], sizeof(KeyframeDesc));
                 }
             }
             break;
@@ -164,14 +151,66 @@ std::optional<NxmdData> NxmdData::load(const std::string &path) {
         }
     }
 
-    SDL_CloseIO(io);
-    return data;
+    return payload;
 }
 
-const std::vector<KeyframeDesc> &NxmdData::animationTracks(uint32_t boneIndex) const {
-    static const std::vector<KeyframeDesc> empty;
-    if (boneIndex >= _animationClips.size()) return empty;
-    return _animationClips[boneIndex];
+static std::optional<NxmdPayload> parseFromFile(const std::string &path) {
+    auto *io = SDL_IOFromFile(path.c_str(), "rb");
+    if (!io) {
+        core::Logger::instance().error("Nxmd: Cannot open file: {}", path);
+        return std::nullopt;
+    }
+    auto result = parseFromIO(io);
+    SDL_CloseIO(io);
+    return result;
+}
+
+// ---- Nxmd Resource ----
+
+Nxmd::Nxmd(const core::NamespacedId &id,
+           std::filesystem::path filePath,
+           core::ResourceMode mode,
+           NxmdPayloadRef payload)
+    : core::Resource(id, std::move(filePath), mode),
+      _payloadRef(std::move(payload)) {}
+
+NxmdPayloadRef Nxmd::decodePayload() const {
+    auto parsed = parseFromFile(filePath().string());
+    if (!parsed.has_value()) return nullptr;
+    return std::make_shared<NxmdPayload>(std::move(*parsed));
+}
+
+Nxmd::Handle Nxmd::resolve(const core::NamespacedId &id,
+                            std::filesystem::path filePath,
+                            core::ResourceMode mode) {
+    NxmdPayloadRef payloadRef;
+
+    if (mode == core::ResourceMode::Dynamic) {
+        auto parsed = parseFromFile(filePath.string());
+        if (!parsed.has_value()) {
+            core::Logger::instance().error("Nxmd: Failed to parse: {} ({})",
+                                           id.toString(), filePath.string());
+            return {};
+        }
+        payloadRef = std::make_shared<NxmdPayload>(std::move(*parsed));
+    }
+    // Static: payloadRef stays empty, decoded on demand
+
+    Nxmd nxmd(id, std::move(filePath), mode, std::move(payloadRef));
+    return Handle(slotMap().insert(std::move(nxmd)));
+}
+
+Nxmd::Handle Nxmd::create(const core::NamespacedId &id,
+                           NxmdPayloadRef payload) {
+    Nxmd nxmd(id, "", core::ResourceMode::Dynamic, std::move(payload));
+    return Handle(slotMap().insert(std::move(nxmd)));
+}
+
+NxmdPayloadRef Nxmd::data() const {
+    if (mode() == core::ResourceMode::Dynamic) {
+        return _payloadRef;
+    }
+    return decodePayload();
 }
 
 } // namespace noix::video

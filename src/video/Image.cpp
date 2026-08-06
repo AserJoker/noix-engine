@@ -17,21 +17,15 @@ Image::Image(const core::NamespacedId &id,
       _surfaceRef(std::move(surface)) {}
 
 Image::Handle Image::resolve(const core::NamespacedId &id,
-                              std::vector<uint8_t> data,
                               std::filesystem::path filePath,
                               core::ResourceMode mode) {
     SurfaceRef surfaceRef;
 
     if (mode == core::ResourceMode::Dynamic) {
-        auto *io = SDL_IOFromConstMem(data.data(), static_cast<size_t>(data.size()));
-        if (!io) {
-            core::Logger::instance().error("Image: Failed to create IO stream");
-            return {};
-        }
-        SDL_Surface *surface = IMG_Load_IO(io, true);
+        SDL_Surface *surface = IMG_Load(filePath.string().c_str());
         if (!surface) {
-            core::Logger::instance().error("Image: Failed to decode: {}",
-                                           SDL_GetError());
+            core::Logger::instance().error("Image: Failed to decode: {} ({})",
+                                           SDL_GetError(), filePath.string());
             return {};
         }
         surfaceRef = SurfaceRef(surface, SurfaceDeleter{});
@@ -39,6 +33,12 @@ Image::Handle Image::resolve(const core::NamespacedId &id,
     // Static: surfaceRef stays empty, decoded on demand
 
     Image img(id, std::move(filePath), mode, std::move(surfaceRef));
+    return Handle(slotMap().insert(std::move(img)));
+}
+
+Image::Handle Image::create(const core::NamespacedId &id,
+                             SurfaceRef surface) {
+    Image img(id, "", core::ResourceMode::Dynamic, std::move(surface));
     return Handle(slotMap().insert(std::move(img)));
 }
 

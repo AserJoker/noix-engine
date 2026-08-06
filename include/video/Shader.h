@@ -40,14 +40,21 @@ public:
                                          uint32_t numSamplers,
                                          uint32_t numUniformBuffers);
 
-    /// Load a SPIR-V shader file and insert into SlotMap.
+    /// Load a SPIR-V shader from filePath and insert into SlotMap.
+    /// Dynamic: reads and creates GPU shader immediately.
     static Handle resolve(const core::NamespacedId &id,
-                          std::vector<uint8_t> data,
                           std::filesystem::path filePath,
                           core::ResourceMode mode = core::ResourceMode::Dynamic,
                           SDL_GPUShaderStage stage = SDL_GPU_SHADERSTAGE_VERTEX,
                           uint32_t numSamplers = 0,
                           uint32_t numUniformBuffers = 0);
+
+    /// Create a builtin Shader from existing SPIR-V data (always Dynamic).
+    static Handle create(const core::NamespacedId &id,
+                         std::vector<uint8_t> spirvData,
+                         SDL_GPUShaderStage stage,
+                         uint32_t numSamplers,
+                         uint32_t numUniformBuffers);
 
     // --- Accessors ---
 

@@ -20,7 +20,6 @@
 
 #include <filesystem>
 #include <memory>
-#include <vector>
 
 namespace noix::video {
 
@@ -38,11 +37,16 @@ public:
         return _cache;
     }
 
-    /// Decode bytes and insert into SlotMap.
+    /// Create Image and insert into SlotMap.
+    /// Dynamic: decodes from filePath immediately.
+    /// Static: stores filePath only, decodes on demand.
     static Handle resolve(const core::NamespacedId &id,
-                          std::vector<uint8_t> data,
                           std::filesystem::path filePath,
                           core::ResourceMode mode = core::ResourceMode::Dynamic);
+
+    /// Create a builtin Image from an existing SurfaceRef (always Dynamic).
+    static Handle create(const core::NamespacedId &id,
+                         SurfaceRef surface);
 
     // --- Surface access ---
 

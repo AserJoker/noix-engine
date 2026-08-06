@@ -30,15 +30,22 @@ public:
         return _cache;
     }
 
-    /// Create a Texture from a SurfaceRef and insert into SlotMap.
-    /// targetFormat: if specified, convert surface to match; if nullopt, preserve original format.
+    /// Create a Texture from a filePath (loads Image internally) and insert into SlotMap.
+    /// Dynamic: loads and uploads immediately.
+    /// Static: stores filePath only, loads on demand.
     static Handle resolve(const core::NamespacedId &id,
-                          const SurfaceRef &surface,
                           std::filesystem::path filePath,
                           core::ResourceMode mode = core::ResourceMode::Dynamic,
                           std::optional<SDL_GPUTextureFormat> targetFormat = std::nullopt,
                           SDL_GPUFilter minFilter = SDL_GPU_FILTER_LINEAR,
                           SDL_GPUFilter magFilter = SDL_GPU_FILTER_LINEAR);
+
+    /// Create a builtin Texture from a SurfaceRef (always Dynamic).
+    static Handle create(const core::NamespacedId &id,
+                         const SurfaceRef &surface,
+                         std::optional<SDL_GPUTextureFormat> targetFormat = std::nullopt,
+                         SDL_GPUFilter minFilter = SDL_GPU_FILTER_LINEAR,
+                         SDL_GPUFilter magFilter = SDL_GPU_FILTER_LINEAR);
 
     // --- Accessors ---
 

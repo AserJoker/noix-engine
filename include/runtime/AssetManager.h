@@ -62,10 +62,8 @@ public:
 
         auto path = resolve(id);
         if (!path) return nullptr;
-        auto data = readFile(path->string());
-        if (!data) return nullptr;
 
-        auto handle = T::resolve(id, std::move(*data));
+        auto handle = T::resolve(id, *path);
         if (!handle.isValid()) return nullptr;
 
         auto ptr = std::make_unique<core::Handle<T>>(handle);

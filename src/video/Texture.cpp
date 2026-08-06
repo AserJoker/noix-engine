@@ -96,12 +96,26 @@ Texture &Texture::operator=(Texture &&other) noexcept {
 }
 
 Texture::Handle Texture::resolve(const core::NamespacedId &id,
-                                  const SurfaceRef &surfaceRef,
                                   std::filesystem::path filePath,
                                   core::ResourceMode mode,
                                   std::optional<SDL_GPUTextureFormat> targetFormat,
                                   SDL_GPUFilter minFilter,
                                   SDL_GPUFilter magFilter) {
+    // Load image from file, then delegate to create
+    auto imgHandle = Image::resolve(id, filePath, mode);
+    if (!imgHandle.isValid()) return {};
+
+    SurfaceRef surface = imgHandle.get()->surface();
+    if (!surface) return {};
+
+    return create(id, surface, targetFormat, minFilter, magFilter);
+}
+
+Texture::Handle Texture::create(const core::NamespacedId &id,
+                                 const SurfaceRef &surfaceRef,
+                                 std::optional<SDL_GPUTextureFormat> targetFormat,
+                                 SDL_GPUFilter minFilter,
+                                 SDL_GPUFilter magFilter) {
     auto *device = runtime::Application::instance()
                        .renderer().gpuDevice();
     if (!device || !surfaceRef) return {};
@@ -213,7 +227,7 @@ Texture::Handle Texture::resolve(const core::NamespacedId &id,
         return {};
     }
 
-    Texture tex(id, std::move(filePath), mode,
+    Texture tex(id, "", core::ResourceMode::Dynamic,
                 texture, sampler,
                 texInfo.width, texInfo.height);
     return Handle(slotMap().insert(std::move(tex)));

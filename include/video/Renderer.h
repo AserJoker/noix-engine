@@ -2,21 +2,18 @@
 
 /*
  * Renderer — SDL3 GPU rendering backend.
- * Manages GPU resources via Pipeline, Texture, MeshCache, MaterialCache.
+ * Manages GPU resources via Pipeline, Texture, Mesh, Material.
  */
 
-#include "video/MaterialCache.h"
-#include "video/MeshCache.h"
+#include "video/Material.h"
+#include "video/Mesh.h"
 #include "video/Pipeline.h"
 #include "video/Texture.h"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
 
-#include <vector>
-
 namespace noix::runtime { class AssetManager; }
-namespace noix::core { class NamespacedId; }
 
 namespace noix::video {
 
@@ -37,13 +34,6 @@ public:
   /// Render the frame.
   void render();
 
-  /// Batch diff-update resource caches.
-  void updateResources(const std::vector<core::NamespacedId> &meshIds,
-                       const std::vector<core::NamespacedId> &materialIds);
-
-  MeshCache &meshCache() { return _meshCache; }
-  MaterialCache &materialCache() { return _materialCache; }
-
   SDL_GPUDevice *gpuDevice() const { return _device; }
 
 private:
@@ -52,15 +42,12 @@ private:
   runtime::AssetManager *_assetMgr = nullptr;
   bool _initialized = false;
 
-  MeshCache _meshCache;
-  MaterialCache _materialCache;
-
   glm::mat4 _view{1.0f};
   glm::mat4 _proj{1.0f};
 
   Pipeline::Handle _defaultPipeline;
-  ResourceHandle _defaultMesh;
-  ResourceHandle _defaultMaterial;
+  Mesh::Handle _defaultMesh;
+  Material::Handle _defaultMaterial;
 
   Texture::Handle _defaultTexture;
 };

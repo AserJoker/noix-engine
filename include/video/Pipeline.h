@@ -30,13 +30,17 @@ public:
         return _cache;
     }
 
-    /// Load a pipeline definition from JSON data and create GPU pipeline.
+    /// Load a pipeline definition from JSON file and create GPU pipeline.
     /// Shaders are loaded internally via AssetManager.
     static Handle resolve(const core::NamespacedId &id,
-                          std::vector<uint8_t> data,
                           std::filesystem::path filePath,
                           core::ResourceMode mode,
                           SDL_GPUTextureFormat format);
+
+    /// Create a builtin Pipeline from JSON data (always Dynamic).
+    static Handle create(const core::NamespacedId &id,
+                         std::vector<uint8_t> jsonData,
+                         SDL_GPUTextureFormat format);
 
     // --- Accessors ---
 

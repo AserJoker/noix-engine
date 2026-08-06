@@ -4,6 +4,7 @@
 #include "core/NamespacedId.h"
 #include "runtime/AssetManager.h"
 #include "video/Image.h"
+#include "video/Mesh.h"
 #include "video/Pipeline.h"
 #include "video/Shader.h"
 
@@ -97,7 +98,7 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         SDL_GetGPUSwapchainTextureFormat(_device, _window);
 
     // Register builtin IDs
-    _meshCache.addBuiltin(core::NamespacedId("noix", "geometry/quad.nxmd"));
+    assetMgr.addBuiltin(core::NamespacedId("noix", "geometry/quad.nxmd"));
 
     // Register embedded builtin shader SPIR-V data
     registerBuiltinShaders(assetMgr);
@@ -106,10 +107,10 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     core::NamespacedId pipelineId("noix", "builtin-textured-pipeline");
     auto jsonBegin = reinterpret_cast<const uint8_t *>(kBuiltinPipelineTextured);
     auto jsonEnd = jsonBegin + sizeof(kBuiltinPipelineTextured) - 1;
-    _defaultPipeline = Pipeline::resolve(
+    _defaultPipeline = Pipeline::create(
         pipelineId,
         std::vector<uint8_t>(jsonBegin, jsonEnd),
-        "", core::ResourceMode::Dynamic, swapchainFormat);
+        swapchainFormat);
     assetMgr.addBuiltin(pipelineId);
     if (!_defaultPipeline.isValid()) {
         core::Logger::instance().error(
@@ -126,10 +127,9 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-    _defaultTexture = Texture::resolve(
+    _defaultTexture = Texture::create(
         core::NamespacedId("noix", "builtin-default"),
-        checkerboard, "",
-        core::ResourceMode::Dynamic,
+        checkerboard,
         std::nullopt,
         SDL_GPU_FILTER_NEAREST,
         SDL_GPU_FILTER_NEAREST);
@@ -141,9 +141,8 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     }
 
     // Load builtin mesh (unit quad)
-    _defaultMesh = _meshCache.create(
-        core::NamespacedId("noix", "geometry/quad.nxmd"),
-        _device, assetMgr);
+    _defaultMesh = Mesh::createBuiltinQuad(
+        core::NamespacedId("noix", "geometry/quad.nxmd"));
     if (!_defaultMesh.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin mesh");
@@ -152,8 +151,11 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     }
 
     // Load default material
-    _defaultMaterial = _materialCache.create(
-        core::NamespacedId("noix", "materials/brick.json"), assetMgr);
+    auto *matHandle = assetMgr.load<Material>(
+        core::NamespacedId("noix", "materials/brick.json"));
+    if (matHandle) {
+        _defaultMaterial = *matHandle;
+    }
 
     // Set up transform matrices: identity view + identity projection (NDC geometry)
     _view = glm::mat4(1.0f);
@@ -172,8 +174,9 @@ void Renderer::shutdown() {
 
     // Release GPU resources BEFORE destroying the device.
     // Destructors call Application::renderer().gpuDevice().
-    _materialCache = MaterialCache();
-    _meshCache = MeshCache();
+    Material::slotMap().clear();
+    Mesh::slotMap().clear();
+    Nxmd::slotMap().clear();
     Pipeline::slotMap().clear();
     Texture::slotMap().clear();
     Shader::slotMap().clear();
@@ -186,17 +189,6 @@ void Renderer::shutdown() {
     _device = nullptr;
     _window = nullptr;
     _initialized = false;
-}
-
-// ---------------------------------------------------------------------------
-
-void Renderer::updateResources(
-    const std::vector<core::NamespacedId> &meshIds,
-    const std::vector<core::NamespacedId> &materialIds) {
-    if (!_initialized) return;
-
-    _meshCache.update(meshIds, _device, *_assetMgr);
-    _materialCache.update(materialIds, *_assetMgr);
 }
 
 // ---------------------------------------------------------------------------
@@ -251,12 +243,19 @@ void Renderer::render() {
     SDL_PushGPUVertexUniformData(cmdBuf, 0, &transformData,
                                  sizeof(transformData));
 
-    GeometryDef *geom = _meshCache.get(_defaultMesh);
-    if (geom) {
+    Mesh *mesh = _defaultMesh.get();
+    if (mesh) {
         SDL_GPUBufferBinding vertexBinding{};
-        vertexBinding.buffer = geom->vertexBuffer();
+        vertexBinding.buffer = mesh->vertexBuffer();
         vertexBinding.offset = 0;
         SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+
+        if (mesh->indexBuffer()) {
+            SDL_GPUBufferBinding indexBinding{};
+            indexBinding.buffer = mesh->indexBuffer();
+            indexBinding.offset = 0;
+            SDL_BindGPUIndexBuffer(pass, &indexBinding, mesh->indexType());
+        }
     }
 
     // Bind texture sampler (builtin checkerboard)
@@ -268,8 +267,12 @@ void Renderer::render() {
         SDL_BindGPUFragmentSamplers(pass, 0, &bind, 1);
     }
 
-    if (geom) {
-        SDL_DrawGPUPrimitives(pass, geom->indexCount(), 1, 0, 0);
+    if (mesh) {
+        if (mesh->indexBuffer()) {
+            SDL_DrawGPUIndexedPrimitives(pass, mesh->indexCount(), 1, 0, 0, 0);
+        } else {
+            SDL_DrawGPUPrimitives(pass, mesh->vertexCount(), 1, 0, 0);
+        }
     }
 
     SDL_EndGPURenderPass(pass);
