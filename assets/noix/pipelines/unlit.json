@@ -1,6 +1,6 @@
 {
-  "vertex_shader": "noix:shaders/textured/texture.vert.spv",
-  "fragment_shader": "noix:shaders/textured/texture.frag.spv",
+  "vertex_shader": "noix:shaders/unlit/texture.vert.spv",
+  "fragment_shader": "noix:shaders/unlit/texture.frag.spv",
   "primitive_type": "triangle_list",
   "vertex_input": {
     "buffers": [

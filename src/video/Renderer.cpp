@@ -30,8 +30,8 @@ static SurfaceRef createBuiltinCheckerboard() {
 // --- Builtin pipeline JSON definition ---
 
 static const char kBuiltinPipelineTextured[] = R"({
-  "vertex_shader": "noix:builtin-textured-vert",
-  "fragment_shader": "noix:builtin-textured-frag",
+  "vertex_shader": "noix:builtin-unlit-vert",
+  "fragment_shader": "noix:builtin-unlit-frag",
   "primitive_type": "triangle_list",
   "vertex_input": {
     "buffers": [
@@ -62,20 +62,20 @@ static const char kBuiltinPipelineTextured[] = R"({
 /// Register embedded SPIR-V data for builtin shaders into AssetManager.
 static void registerBuiltinShaders(runtime::AssetManager &assetMgr) {
     auto vertSpirv = std::make_shared<std::vector<uint8_t>>(
-        kShader_textured_texture_vert_spv,
-        kShader_textured_texture_vert_spv + kShader_textured_texture_vert_spv_size);
+        kShader_unlit_texture_vert_spv,
+        kShader_unlit_texture_vert_spv + kShader_unlit_texture_vert_spv_size);
     assetMgr.create<Shader>(
-        core::NamespacedId("noix", "builtin-textured-vert"),
+        core::NamespacedId("noix", "builtin-unlit-vert"),
         vertSpirv);
-    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-textured-vert"));
+    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-unlit-vert"));
 
     auto fragSpirv = std::make_shared<std::vector<uint8_t>>(
-        kShader_textured_texture_frag_spv,
-        kShader_textured_texture_frag_spv + kShader_textured_texture_frag_spv_size);
+        kShader_unlit_texture_frag_spv,
+        kShader_unlit_texture_frag_spv + kShader_unlit_texture_frag_spv_size);
     assetMgr.create<Shader>(
-        core::NamespacedId("noix", "builtin-textured-frag"),
+        core::NamespacedId("noix", "builtin-unlit-frag"),
         fragSpirv);
-    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-textured-frag"));
+    assetMgr.addBuiltin(core::NamespacedId("noix", "builtin-unlit-frag"));
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     registerBuiltinShaders(assetMgr);
 
     // Build builtin pipeline directly from embedded JSON
-    core::NamespacedId pipelineId("noix", "builtin-textured-pipeline");
+    core::NamespacedId pipelineId("noix", "builtin-unlit-pipeline");
     auto jsonBegin = reinterpret_cast<const uint8_t *>(kBuiltinPipelineTextured);
     auto jsonEnd = jsonBegin + sizeof(kBuiltinPipelineTextured) - 1;
     _defaultPipeline = assetMgr.create<Pipeline>(
