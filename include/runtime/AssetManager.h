@@ -2,9 +2,9 @@
 
 #include "core/Handle.h"
 #include "core/NamespacedId.h"
+#include "core/SlotId.h"
 
 #include <filesystem>
-#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,7 +20,7 @@ public:
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 
-    // --- Path resolution (existing) ---
+    // --- Path resolution ---
 
     /// Add a resource pack directory. Later additions have higher priority.
     void addPack(const std::filesystem::path& packPath);
@@ -49,60 +49,58 @@ public:
     /// Get the engine default resource path (basePath).
     const std::filesystem::path& defaultPath() const { return _defaultPath; }
 
-    // --- Generic load / unload ---
+    // --- Generic load / create / unload ---
 
-    /// Load a resource by type from file. Returns nullptr on failure.
+    /// Load a resource by type from file. Returns invalid Handle on failure.
     /// If already loaded, returns the existing Handle.
     template<typename T>
-    core::Handle<T> *load(const core::NamespacedId &id) {
+    core::Handle<T> load(const core::NamespacedId &id) {
         auto it = _activeResources.find(id);
         if (it != _activeResources.end()) {
-            return static_cast<core::Handle<T>*>(it->second.get());
+            return core::Handle<T>(it->second.slotId);
         }
 
         auto path = resolve(id);
-        if (!path) return nullptr;
+        if (!path) return {};
 
         auto handle = T::resolve(id, *path);
-        if (!handle.isValid()) return nullptr;
+        if (!handle.isValid()) return {};
 
-        auto ptr = std::make_unique<core::Handle<T>>(handle);
-        auto *raw = ptr.get();
-        _activeResources[id] = std::move(ptr);
-        return raw;
+        _activeResources[id] = { handle.slotId(),
+            [](core::SlotId s) { T::slotMap().remove(s); } };
+        return handle;
     }
 
-    /// Create a builtin resource by type with direct data. Returns nullptr on failure.
+    /// Create a builtin resource by type with direct data. Returns invalid Handle on failure.
     /// If already created, returns the existing Handle.
     template<typename T, typename... Args>
-    core::Handle<T> *create(const core::NamespacedId &id, Args&&... args) {
+    core::Handle<T> create(const core::NamespacedId &id, Args&&... args) {
         auto it = _activeResources.find(id);
         if (it != _activeResources.end()) {
-            return static_cast<core::Handle<T>*>(it->second.get());
+            return core::Handle<T>(it->second.slotId);
         }
 
         auto handle = T::create(id, std::forward<Args>(args)...);
-        if (!handle.isValid()) return nullptr;
+        if (!handle.isValid()) return {};
 
-        auto ptr = std::make_unique<core::Handle<T>>(handle);
-        auto *raw = ptr.get();
-        _activeResources[id] = std::move(ptr);
-        return raw;
+        _activeResources[id] = { handle.slotId(),
+            [](core::SlotId s) { T::slotMap().remove(s); } };
+        return handle;
     }
 
-    /// Unload a resource by id. Calls BaseHandle::unload() then removes from map.
+    /// Unload a resource by id. Removes from SlotMap then removes from map.
     /// No-op if not loaded or is a builtin.
     void unload(const core::NamespacedId &id);
 
     /// Check if a resource is currently loaded.
     bool isLoaded(const core::NamespacedId &id) const;
 
-    /// Get an already-loaded Handle without loading. Returns nullptr if not loaded.
+    /// Get an already-loaded Handle without loading. Returns invalid Handle if not loaded.
     template<typename T>
-    core::Handle<T> *find(const core::NamespacedId &id) const {
+    core::Handle<T> find(const core::NamespacedId &id) const {
         auto it = _activeResources.find(id);
-        if (it == _activeResources.end()) return nullptr;
-        return static_cast<core::Handle<T>*>(it->second.get());
+        if (it == _activeResources.end()) return {};
+        return core::Handle<T>(it->second.slotId);
     }
 
     /// Unload all non-builtin resources.
@@ -122,7 +120,6 @@ public:
     // --- Builtin data ---
 
     /// Register in-memory data for a builtin resource.
-    /// Shader::loadFromAsset uses this instead of reading from disk.
     void addBuiltinData(const core::NamespacedId &id, std::vector<uint8_t> data);
 
     /// Get builtin data for a resource. Returns nullptr if not registered.
@@ -138,10 +135,18 @@ private:
     std::vector<std::filesystem::path>::iterator findPack(const std::filesystem::path& packPath);
     static std::optional<std::vector<uint8_t>> readFile(const std::string &path);
 
+    /// Type-erased unload function for a stored SlotId.
+    using UnloadFn = void(*)(core::SlotId);
+
+    struct ResourceEntry {
+        core::SlotId slotId{};
+        UnloadFn unload = nullptr;
+    };
+
     std::filesystem::path _defaultPath;
     std::vector<std::filesystem::path> _packRoots;
 
-    std::unordered_map<core::NamespacedId, std::unique_ptr<core::BaseHandle>> _activeResources;
+    std::unordered_map<core::NamespacedId, ResourceEntry> _activeResources;
     std::unordered_set<core::NamespacedId> _builtins;
     std::unordered_map<core::NamespacedId, std::vector<uint8_t>> _builtinData;
 };

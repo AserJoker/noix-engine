@@ -112,18 +112,17 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
     core::NamespacedId pipelineId("noix", "builtin-textured-pipeline");
     auto jsonBegin = reinterpret_cast<const uint8_t *>(kBuiltinPipelineTextured);
     auto jsonEnd = jsonBegin + sizeof(kBuiltinPipelineTextured) - 1;
-    auto *pipelineHandle = assetMgr.create<Pipeline>(
+    _defaultPipeline = assetMgr.create<Pipeline>(
         pipelineId,
         std::vector<uint8_t>(jsonBegin, jsonEnd),
         swapchainFormat);
     assetMgr.addBuiltin(pipelineId);
-    if (!pipelineHandle) {
+    if (!_defaultPipeline.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin pipeline");
         shutdown();
         return false;
     }
-    _defaultPipeline = *pipelineHandle;
 
     // Load builtin texture (2x2 checkerboard, code-generated)
     auto checkerboard = createBuiltinCheckerboard();
@@ -133,39 +132,32 @@ bool Renderer::init(SDL_Window *window, runtime::AssetManager &assetMgr) {
         shutdown();
         return false;
     }
-    auto *textureHandle = assetMgr.create<Texture>(
+    _defaultTexture = assetMgr.create<Texture>(
         core::NamespacedId("noix", "builtin-default"),
         checkerboard,
         std::nullopt,
         SDL_GPU_FILTER_NEAREST,
         SDL_GPU_FILTER_NEAREST);
-    if (!textureHandle) {
+    if (!_defaultTexture.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin texture");
         shutdown();
         return false;
     }
-    _defaultTexture = *textureHandle;
 
     // Load builtin mesh (unit quad)
-    Mesh::Handle builtinMesh;
-    auto *meshHandle = assetMgr.create<Mesh>(
+    auto builtinMesh = assetMgr.create<Mesh>(
         core::NamespacedId("noix", "geometry/quad.nxmd"));
-    if (!meshHandle) {
+    if (!builtinMesh.isValid()) {
         core::Logger::instance().error(
             "Renderer: Failed to create builtin mesh");
         shutdown();
         return false;
     }
-    builtinMesh = *meshHandle;
 
     // Load default material
-    Material::Handle builtinMaterial;
-    auto *matHandle = assetMgr.load<Material>(
+    auto builtinMaterial = assetMgr.load<Material>(
         core::NamespacedId("noix", "materials/brick.json"));
-    if (matHandle) {
-        builtinMaterial = *matHandle;
-    }
 
     // Create default Drawable for validation
     if (builtinMesh.isValid() && builtinMaterial.isValid()) {

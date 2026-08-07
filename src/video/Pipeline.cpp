@@ -442,16 +442,16 @@ Pipeline::Handle Pipeline::create(const core::NamespacedId &id,
     auto &assetMgr = runtime::Application::instance().assetManager();
 
     // Load vertex shader data
-    auto *vsHandle = assetMgr.find<Shader>(vertexShaderId);
-    if (!vsHandle) {
+    auto vsHandle = assetMgr.find<Shader>(vertexShaderId);
+    if (!vsHandle.isValid()) {
         vsHandle = assetMgr.load<Shader>(vertexShaderId);
     }
-    if (!vsHandle) {
+    if (!vsHandle.isValid()) {
         core::Logger::instance().error(
             "Pipeline: Failed to load vertex shader: {}", vertexShaderId.toString());
         return {};
     }
-    SpirvRef vsSpirv = vsHandle->get()->data();
+    SpirvRef vsSpirv = vsHandle.get()->data();
     if (!vsSpirv) return {};
 
     SDL_GPUShader *vs = createGpuShader(device, vsSpirv,
@@ -464,18 +464,18 @@ Pipeline::Handle Pipeline::create(const core::NamespacedId &id,
 
     SDL_GPUShader *fs = nullptr;
     if (fragmentShaderId.has_value()) {
-        auto *fsHandle = assetMgr.find<Shader>(*fragmentShaderId);
-        if (!fsHandle) {
+        auto fsHandle = assetMgr.find<Shader>(*fragmentShaderId);
+        if (!fsHandle.isValid()) {
             fsHandle = assetMgr.load<Shader>(*fragmentShaderId);
         }
-        if (!fsHandle) {
+        if (!fsHandle.isValid()) {
             core::Logger::instance().error(
                 "Pipeline: Failed to load fragment shader: {}",
                 fragmentShaderId->toString());
             releaseGpuShader(device, vs);
             return {};
         }
-        SpirvRef fsSpirv = fsHandle->get()->data();
+        SpirvRef fsSpirv = fsHandle.get()->data();
         if (!fsSpirv) {
             releaseGpuShader(device, vs);
             return {};

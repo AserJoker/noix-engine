@@ -78,7 +78,7 @@ void AssetManager::unload(const core::NamespacedId &id) {
     if (_builtins.count(id)) return;
     auto it = _activeResources.find(id);
     if (it == _activeResources.end()) return;
-    it->second->unload();
+    if (it->second.unload) it->second.unload(it->second.slotId);
     _activeResources.erase(it);
 }
 
@@ -91,7 +91,7 @@ void AssetManager::unloadAll() {
         if (_builtins.count(it->first)) {
             ++it;
         } else {
-            it->second->unload();
+            if (it->second.unload) it->second.unload(it->second.slotId);
             it = _activeResources.erase(it);
         }
     }
@@ -99,7 +99,7 @@ void AssetManager::unloadAll() {
 
 void AssetManager::shutdown() {
     for (auto it = _activeResources.begin(); it != _activeResources.end(); ) {
-        it->second->unload();
+        if (it->second.unload) it->second.unload(it->second.slotId);
         it = _activeResources.erase(it);
     }
     _builtins.clear();
