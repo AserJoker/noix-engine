@@ -286,8 +286,22 @@ Texture::Handle Texture::create(const core::NamespacedId &id,
             uploadSurface = converted;
         }
     } else {
-        // No format specified: preserve original surface format
+        // No format specified: map to GPU format, ensure 4-byte pixel format
         gpuFormat = surfaceFormatToGpuFormat(rawSurface->format);
+
+        // RGB surfaces (3 bytes/pixel) must be converted to RGBA for GPU upload
+        SDL_PixelFormat expectedPixelFmt = gpuFormatToSurfaceFormat(gpuFormat);
+        if (rawSurface->format != expectedPixelFmt) {
+            SDL_Surface *converted =
+                SDL_ConvertSurface(rawSurface, expectedPixelFmt);
+            if (!converted) {
+                core::Logger::instance().error(
+                    "Texture: Failed to convert surface to 4-byte pixel format");
+                return {};
+            }
+            convertedRef = SurfaceRef(converted, SurfaceDeleter{});
+            uploadSurface = converted;
+        }
     }
 
     auto result = uploadToGpu(uploadSurface, gpuFormat,

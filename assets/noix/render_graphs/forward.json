@@ -1,0 +1,10 @@
+{
+  "passes": [
+    {
+      "name": "forward",
+      "pipeline": "noix:pipelines/unlit.json",
+      "target": "swapchain",
+      "sort": "none"
+    }
+  ]
+}

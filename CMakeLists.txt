@@ -92,6 +92,7 @@ add_executable(noix-engine
     src/video/Nxmd.cpp
     src/video/Mesh.cpp
     src/video/Material.cpp
+    src/video/RenderGraph.cpp
     src/video/Drawable.cpp
     src/video/Renderer.cpp
 )

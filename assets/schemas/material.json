@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "noix:schemas/material",
+  "title": "Material",
+  "description": "Material definition: per-pass resource bindings. Top-level keys are pass names that match RenderGraph pass definitions.",
+
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": {
+    "$ref": "#/$defs/PassResources"
+  },
+
+  "$defs": {
+    "PassResources": {
+      "description": "Resources bound for a specific render pass.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uniforms": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/UniformValue"
+          },
+          "description": "Uniform parameter overrides. Key is the uniform variable name."
+        },
+        "textures": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/TextureBinding"
+          },
+          "description": "Texture bindings. Key is the sampler variable name (e.g. 'u_albedo')."
+        }
+      }
+    },
+
+    "UniformValue": {
+      "description": "A uniform value. Number for float, array of numbers for vec2/vec3/vec4.",
+      "oneOf": [
+        { "type": "number" },
+        {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 4
+        }
+      ]
+    },
+
+    "TextureBinding": {
+      "description": "A texture binding. String shorthand (NamespacedId) or full object with sampler config.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Shorthand: NamespacedId of the texture asset (e.g. 'noix:texture/brickwall.jpg'). Sampler uses defaults."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["asset"],
+          "properties": {
+            "asset": {
+              "type": "string",
+              "description": "NamespacedId of the texture asset."
+            },
+            "format": {
+              "$ref": "#/$defs/TextureFormat"
+            },
+            "min_filter": {
+              "$ref": "#/$defs/FilterMode",
+              "default": "linear"
+            },
+            "mag_filter": {
+              "$ref": "#/$defs/FilterMode",
+              "default": "linear"
+            },
+            "address_mode_u": {
+              "$ref": "#/$defs/AddressMode",
+              "default": "repeat"
+            },
+            "address_mode_v": {
+              "$ref": "#/$defs/AddressMode",
+              "default": "repeat"
+            }
+          }
+        }
+      ]
+    },
+
+    "FilterMode": {
+      "type": "string",
+      "enum": ["nearest", "linear"],
+      "description": "Texture sampling filter mode.",
+      "default": "linear"
+    },
+
+    "AddressMode": {
+      "type": "string",
+      "enum": ["repeat", "mirror_repeat", "clamp_to_edge"],
+      "description": "Texture address/wrap mode.",
+      "default": "repeat"
+    },
+
+    "TextureFormat": {
+      "type": "string",
+      "enum": [
+        "",
+        "r8g8b8a8_unorm",
+        "b8g8r8a8_unorm",
+        "r8_unorm",
+        "r8g8_unorm",
+        "r8g8b8a8_snorm",
+        "r16_float",
+        "r16g16_float",
+        "r16g16b16a16_float",
+        "r32_float",
+        "r32g32_float",
+        "r32g32b32a32_float"
+      ],
+      "default": "",
+      "description": "GPU texture format override. Empty string preserves the original surface format."
+    }
+  }
+}

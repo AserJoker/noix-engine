@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "noix:schemas/render_graph",
+  "title": "RenderGraph",
+  "description": "Render graph definition: intermediate textures and pass sequence with pipeline mapping.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["passes"],
+  "properties": {
+    "textures": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/RenderTexture"
+      },
+      "description": "Intermediate textures for pass-to-pass data transfer. Key is the texture name referenced by pass targets."
+    },
+    "passes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RenderPass"
+      },
+      "minItems": 1,
+      "description": "Ordered list of render passes."
+    }
+  },
+
+  "$defs": {
+    "RenderTexture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format"],
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/TextureFormat",
+          "description": "GPU texture format."
+        },
+        "size": {
+          "oneOf": [
+            {
+              "type": "string",
+              "const": "window",
+              "description": "Same size as the swapchain window."
+            },
+            {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1 },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Fixed size [width, height]."
+            }
+          ],
+          "default": "window",
+          "description": "Texture size mode."
+        }
+      }
+    },
+
+    "RenderPass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pipeline"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Pass name. Must match a key in the Material JSON."
+        },
+        "pipeline": {
+          "type": "string",
+          "description": "NamespacedId of the pipeline asset (e.g. 'noix:pipelines/unlit.json')."
+        },
+        "target": {
+          "type": "string",
+          "default": "swapchain",
+          "description": "Render target: 'swapchain' or the name of a declared intermediate texture."
+        },
+        "sort": {
+          "$ref": "#/$defs/SortMode",
+          "default": "none"
+        }
+      }
+    },
+
+    "SortMode": {
+      "type": "string",
+      "enum": ["none", "back_to_front", "front_to_back"],
+      "default": "none",
+      "description": "Draw call sorting mode within a pass."
+    },
+
+    "TextureFormat": {
+      "type": "string",
+      "enum": [
+        "r8g8b8a8_unorm",
+        "b8g8r8a8_unorm",
+        "r8_unorm",
+        "r8g8_unorm",
+        "r8g8b8a8_snorm",
+        "r16_float",
+        "r16g16_float",
+        "r16g16b16a16_float",
+        "r32_float",
+        "r32g32_float",
+        "r32g32b32a32_float"
+      ],
+      "description": "GPU texture format."
+    }
+  }
+}

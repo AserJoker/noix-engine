@@ -34,12 +34,17 @@ struct TextureBinding {
     std::string addressModeV = "repeat";
 };
 
+// ---- Per-pass resources ----
+
+struct PassResources {
+    std::map<std::string, core::Value> uniforms;
+    std::map<std::string, TextureBinding> textures;
+};
+
 // ---- Parsed material data ----
 
 struct MaterialPayload {
-    core::NamespacedId pipeline;
-    std::map<std::string, core::Value> uniforms;
-    std::map<std::string, TextureBinding> textures;
+    std::map<std::string, PassResources> passes;  // key = pass name
 };
 
 /// Reference-counted MaterialPayload. Auto-freed on last reference drop.

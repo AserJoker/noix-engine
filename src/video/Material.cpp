@@ -8,9 +8,68 @@
 
 namespace noix::video {
 
-// ---- Parsing ----
+// ---- Parsing helpers ----
 
-static std::optional<MaterialPayload> parseFromPath(const std::string &path) {
+static bool parseTextureBinding(const core::Value &val, TextureBinding &out) {
+    if (val.isString()) {
+        out.asset = core::NamespacedId::parse(val.asString());
+        return true;
+    }
+    if (val.isObject()) {
+        auto assetStr = val["asset"].asString();
+        if (assetStr.empty()) return false;
+        out.asset = core::NamespacedId::parse(assetStr);
+        out.format = val["format"].asString("");
+        out.minFilter = val["min_filter"].asString("linear");
+        out.magFilter = val["mag_filter"].asString("linear");
+        out.addressModeU = val["address_mode_u"].asString("repeat");
+        out.addressModeV = val["address_mode_v"].asString("repeat");
+        return true;
+    }
+    return false;
+}
+
+static std::optional<MaterialPayload> parsePayload(const core::Value &root) {
+    if (!root.isObject()) return std::nullopt;
+
+    MaterialPayload payload;
+
+    for (const auto &[passName, passVal] : root.asObject()) {
+        if (!passVal.isObject()) continue;
+
+        PassResources pr;
+        auto uniforms = passVal["uniforms"];
+        if (uniforms.isObject()) {
+            for (const auto &[key, val] : uniforms.asObject()) {
+                pr.uniforms[key] = val;
+            }
+        }
+
+        auto textures = passVal["textures"];
+        if (textures.isObject()) {
+            for (const auto &[key, val] : textures.asObject()) {
+                TextureBinding binding;
+                if (!parseTextureBinding(val, binding)) {
+                    core::Logger::instance().error(
+                        "Material: Invalid texture binding for '{}.{}'", passName, key);
+                    continue;
+                }
+                pr.textures[key] = binding;
+            }
+        }
+
+        payload.passes[passName] = std::move(pr);
+    }
+
+    if (payload.passes.empty()) {
+        core::Logger::instance().error("Material: No passes defined");
+        return std::nullopt;
+    }
+
+    return payload;
+}
+
+static std::optional<MaterialPayload> parseFromFile(const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open()) {
         core::Logger::instance().error("Material: Cannot open file: {}", path);
@@ -23,59 +82,7 @@ static std::optional<MaterialPayload> parseFromPath(const std::string &path) {
         core::Logger::instance().error("Material: Cannot parse file: {}", path);
         return std::nullopt;
     }
-
-    if (!root.isObject()) {
-        core::Logger::instance().error("Material: Root is not an object");
-        return std::nullopt;
-    }
-
-    MaterialPayload payload;
-
-    auto pipelineStr = root["pipeline"].asString();
-    if (pipelineStr.empty()) {
-        core::Logger::instance().error("Material: Missing 'pipeline' field");
-        return std::nullopt;
-    }
-    payload.pipeline = core::NamespacedId::parse(pipelineStr);
-
-    auto uniforms = root["uniforms"];
-    if (uniforms.isObject()) {
-        for (const auto &[key, val] : uniforms.asObject()) {
-            payload.uniforms[key] = val;
-        }
-    }
-
-    auto textures = root["textures"];
-    if (textures.isObject()) {
-        for (const auto &[key, val] : textures.asObject()) {
-            TextureBinding binding;
-
-            if (val.isString()) {
-                binding.asset = core::NamespacedId::parse(val.asString());
-            } else if (val.isObject()) {
-                auto assetStr = val["asset"].asString();
-                if (assetStr.empty()) {
-                    core::Logger::instance().error(
-                        "Material: Texture '{}' missing 'asset' field", key);
-                    continue;
-                }
-                binding.asset = core::NamespacedId::parse(assetStr);
-                binding.format = val["format"].asString("");
-                binding.minFilter = val["min_filter"].asString("linear");
-                binding.magFilter = val["mag_filter"].asString("linear");
-                binding.addressModeU = val["address_mode_u"].asString("repeat");
-                binding.addressModeV = val["address_mode_v"].asString("repeat");
-            } else {
-                core::Logger::instance().error(
-                    "Material: Invalid texture binding for '{}'", key);
-                continue;
-            }
-
-            payload.textures[key] = binding;
-        }
-    }
-
-    return payload;
+    return parsePayload(root);
 }
 
 // ---- Material Resource ----
@@ -90,49 +97,13 @@ Material::Material(const core::NamespacedId &id,
 MaterialPayloadRef Material::decodePayload() const {
     auto content = readFileContent();
     if (content.empty()) return nullptr;
-    // Parse from the read content
-    std::string jsonStr(reinterpret_cast<const char *>(content.data()), content.size());
+    std::string jsonStr(reinterpret_cast<const char *>(content.data()),
+                        content.size());
     auto root = core::Value::parse(jsonStr);
     if (root.isNull()) return nullptr;
-    // Reuse parseFromPath logic by writing to temp and parsing...
-    // Actually, just parse inline:
-    if (!root.isObject()) return nullptr;
-
-    MaterialPayload payload;
-    auto pipelineStr = root["pipeline"].asString();
-    if (pipelineStr.empty()) return nullptr;
-    payload.pipeline = core::NamespacedId::parse(pipelineStr);
-
-    auto uniforms = root["uniforms"];
-    if (uniforms.isObject()) {
-        for (const auto &[key, val] : uniforms.asObject()) {
-            payload.uniforms[key] = val;
-        }
-    }
-
-    auto textures = root["textures"];
-    if (textures.isObject()) {
-        for (const auto &[key, val] : textures.asObject()) {
-            TextureBinding binding;
-            if (val.isString()) {
-                binding.asset = core::NamespacedId::parse(val.asString());
-            } else if (val.isObject()) {
-                auto assetStr = val["asset"].asString();
-                if (assetStr.empty()) continue;
-                binding.asset = core::NamespacedId::parse(assetStr);
-                binding.format = val["format"].asString("");
-                binding.minFilter = val["min_filter"].asString("linear");
-                binding.magFilter = val["mag_filter"].asString("linear");
-                binding.addressModeU = val["address_mode_u"].asString("repeat");
-                binding.addressModeV = val["address_mode_v"].asString("repeat");
-            } else {
-                continue;
-            }
-            payload.textures[key] = binding;
-        }
-    }
-
-    return std::make_shared<MaterialPayload>(std::move(payload));
+    auto parsed = parsePayload(root);
+    if (!parsed.has_value()) return nullptr;
+    return std::make_shared<MaterialPayload>(std::move(*parsed));
 }
 
 Material::Handle Material::resolve(const core::NamespacedId &id,
@@ -141,7 +112,7 @@ Material::Handle Material::resolve(const core::NamespacedId &id,
     MaterialPayloadRef payloadRef;
 
     if (mode == core::ResourceMode::Dynamic) {
-        auto parsed = parseFromPath(filePath.string());
+        auto parsed = parseFromFile(filePath.string());
         if (!parsed.has_value()) {
             core::Logger::instance().error("Material: Failed to parse: {} ({})",
                                            id.toString(), filePath.string());
@@ -149,7 +120,6 @@ Material::Handle Material::resolve(const core::NamespacedId &id,
         }
         payloadRef = std::make_shared<MaterialPayload>(std::move(*parsed));
     }
-    // Static: payloadRef stays empty, decoded on demand
 
     Material mat(id, std::move(filePath), mode, std::move(payloadRef));
     return Handle(slotMap().insert(std::move(mat)));

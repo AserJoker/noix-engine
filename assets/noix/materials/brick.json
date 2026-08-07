@@ -1,6 +1,7 @@
 {
-  "pipeline": "noix:pipelines/textured.json",
-  "textures": {
-    "u_albedo": "noix:texture/brickwall.jpg"
+  "forward": {
+    "textures": {
+      "u_albedo": "noix:texture/brickwall.jpg"
+    }
   }
 }

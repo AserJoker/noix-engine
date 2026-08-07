@@ -2,16 +2,20 @@
 
 /*
  * Renderer — SDL3 GPU rendering backend.
- * Iterates Drawable list, binds resources, issues draw calls.
+ * Iterates RenderGraph passes, filters Drawables by material pass participation,
+ * binds resources, issues draw calls.
  */
 
 #include "video/Drawable.h"
 #include "video/Pipeline.h"
+#include "video/RenderGraph.h"
 #include "video/Texture.h"
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace noix::runtime { class AssetManager; }
@@ -44,6 +48,9 @@ public:
   void clearDrawables();
 
 private:
+  /// Create GPU textures for intermediate render targets declared in the RenderGraph.
+  bool createRenderTextures(int windowWidth, int windowHeight);
+
   SDL_GPUDevice *_device = nullptr;
   SDL_Window *_window = nullptr;
   runtime::AssetManager *_assetMgr = nullptr;
@@ -52,8 +59,11 @@ private:
   glm::mat4 _view{1.0f};
   glm::mat4 _proj{1.0f};
 
-  Pipeline::Handle _defaultPipeline;
-  Texture::Handle  _defaultTexture;
+  RenderGraph _renderGraph;
+  Texture::Handle _defaultTexture;
+
+  // Intermediate render textures: name → SDL_GPUTexture*
+  std::unordered_map<std::string, SDL_GPUTexture *> _renderTextures;
 
   std::vector<Drawable> _drawables;
 };
